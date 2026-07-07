@@ -1,0 +1,35 @@
+#!/bin/bash
+# 应用生命周期主脚本：fnOS 通过 `cmd/main start|stop|status` 调用。
+# 通过 docker compose 管理容器。路径使用 fnOS 注入的环境变量，不硬编码。
+
+set -eu
+
+# TRIM_APPDEST：应用已安装文件目录（含 app/docker/docker-compose.yaml）。
+APPDEST="${TRIM_APPDEST:-/var/apps/bgi-trigger}"
+COMPOSE_FILE="$APPDEST/app/docker/docker-compose.yaml"
+
+# 导出 etc/var 路径供 docker-compose 读取（见 docker-compose.yaml 中的 ${TRIM_PKGETC}）。
+export TRIM_PKGETC="${TRIM_PKGETC:-$APPDEST/etc}"
+export TRIM_PKGVAR="${TRIM_PKGVAR:-$APPDEST/var}"
+
+case "${1:-}" in
+  start)
+    docker compose -f "$COMPOSE_FILE" up -d --build
+    ;;
+  stop)
+    docker compose -f "$COMPOSE_FILE" down
+    ;;
+  status)
+    if docker compose -f "$COMPOSE_FILE" ps --status running | grep -q bgi-trigger; then
+      echo "running"
+      exit 0
+    else
+      echo "stopped"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|status}" >&2
+    exit 2
+    ;;
+esac

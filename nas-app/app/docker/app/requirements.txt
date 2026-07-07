@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+# 后续 M3/M5 用到的扫描/网络依赖（提前列出，M2 暂未使用）：
+netifaces>=0.11
+python-nmap>=0.7
+httpx>=0.27

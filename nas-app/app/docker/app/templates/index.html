@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BetterGI Trigger — NAS 应用</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body>
+  <main class="container">
+    <h1>🎮 BetterGI Trigger</h1>
+
+    <section>
+      <h2>当前目标</h2>
+      {% if config.default_target %}
+        <p>已配对设备：<strong>{{ config.default_target.hostname }}</strong>
+           （{{ config.default_target.ip }}:{{ config.default_target.port }}）</p>
+      {% else %}
+        <p>未配对设备，请先<a href="#">扫描设备</a>。</p>
+      {% endif %}
+    </section>
+
+    <!-- M3/M4/M5 将在此补充：设备扫描、任务触发、运行历史、端口诊断等面板 -->
+  </main>
+</body>
+</html>

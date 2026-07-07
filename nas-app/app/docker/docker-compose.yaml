@@ -1,0 +1,22 @@
+# NAS 应用 docker-compose 编排。
+# 关键点：
+# 1. network_mode: host —— 扫描局域网必需（容器需直接看到宿主 LAN 子网）。
+# 2. 挂载 fnOS 应用的 etc/var 目录到容器，使配置与运行数据持久化。
+#    路径由 fnOS 通过环境变量 TRIM_PKGETC / TRIM_PKGVAR 提供（见 cmd/main）。
+# 3. 镜像名 bgi-trigger-nas；构建上下文为本目录（Dockerfile 同级）。
+services:
+  bgi-trigger:
+    image: bgi-trigger-nas:latest
+    container_name: bgi-trigger
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      # 由 cmd/main 启动时注入实际路径
+      TRIM_PKGETC: ${TRIM_PKGETC}
+      TRIM_PKGVAR: ${TRIM_PKGVAR}
+    volumes:
+      - ${TRIM_PKGETC}:/etc/app
+      - ${TRIM_PKGVAR}:/var/app
+    build:
+      context: .
+      dockerfile: Dockerfile
