@@ -5,22 +5,167 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BetterGI Trigger — NAS 应用</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    .muted { color: var(--pico-muted-color); }
+    .device-row { display:flex; gap:.5rem; align-items:center; margin:.25rem 0; }
+    .tag { font-size:.8rem; padding:.1rem .4rem; border-radius:.3rem; background:var(--pico-secondary-background); }
+    .ok { color: #2a9d8f; } .err { color: #e76f51; }
+  </style>
 </head>
 <body>
-  <main class="container">
-    <h1>🎮 BetterGI Trigger</h1>
+<main class="container">
+  <h1>🎮 BetterGI Trigger</h1>
 
-    <section>
-      <h2>当前目标</h2>
-      {% if config.default_target %}
-        <p>已配对设备：<strong>{{ config.default_target.hostname }}</strong>
-           （{{ config.default_target.ip }}:{{ config.default_target.port }}）</p>
-      {% else %}
-        <p>未配对设备，请先<a href="#">扫描设备</a>。</p>
-      {% endif %}
-    </section>
+  <!-- 当前目标 / 配对 -->
+  <section>
+    <h2>当前目标</h2>
+    <p id="target-info" class="muted">加载中…</p>
+    <button id="btn-unpair" class="outline secondary" hidden>取消配对</button>
+  </section>
 
-    <!-- M3/M4/M5 将在此补充：设备扫描、任务触发、运行历史、端口诊断等面板 -->
-  </main>
+  <!-- 设备扫描 -->
+  <section>
+    <h2>扫描设备</h2>
+    <p class="muted">扫描局域网内的 BetterGI 监听器（首次使用点这里）。</p>
+    <button id="btn-scan">🔍 扫描局域网</button>
+    <div id="scan-result"></div>
+    <div id="pair-form" hidden>
+      <label>密钥
+        <input id="pair-key" type="text" placeholder="粘贴 Windows 监听器显示的密钥">
+      </label>
+      <button id="btn-pair">配对并测试连接</button>
+    </div>
+  </section>
+
+  <!-- 任务 -->
+  <section>
+    <h2>任务</h2>
+    <button id="btn-load-tasks" class="outline">刷新任务列表</button>
+    <div id="tasks"></div>
+  </section>
+
+  <!-- 运行状态 -->
+  <section>
+    <h2>运行状态</h2>
+    <p id="run-status" class="muted">空闲</p>
+  </section>
+
+  <!-- 历史 -->
+  <section>
+    <h2>运行历史</h2>
+    <button id="btn-load-jobs" class="outline">刷新历史</button>
+    <ul id="jobs"></ul>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function api(method, path, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || (`HTTP ${r.status}`));
+  return data;
+}
+
+// 当前目标
+async function refreshTarget() {
+  try {
+    const cfg = await api('GET', '/api/config');
+    const t = cfg.default_target;
+    if (t) {
+      $('target-info').innerHTML = `已配对：<strong>${t.hostname || t.ip}</strong>（${t.ip}:${t.port}）`;
+      $('btn-unpair').hidden = false;
+    } else {
+      $('target-info').textContent = '未配对设备，请先扫描。';
+      $('btn-unpair').hidden = true;
+    }
+  } catch (e) { $('target-info').textContent = '读取配置失败：' + e.message; }
+}
+
+// 扫描
+$('btn-scan').onclick = async () => {
+  $('scan-result').innerHTML = '<p class="muted">扫描中…（约 10-30 秒）</p>';
+  try {
+    const { devices } = await api('POST', '/api/scan');
+    if (!devices.length) { $('scan-result').innerHTML = '<p class="err">未发现 BetterGI 监听器。</p>'; return; }
+    $('scan-result').innerHTML = devices.map(d =>
+      `<div class="device-row">
+         <span>${d.hostname || '(未知主机)'} — ${d.ip}:${d.port}</span>
+         <button class="outline tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
+       </div>`).join('');
+    document.querySelectorAll('.device-row button').forEach(b =>
+      b.onclick = () => { selected = b.dataset; $('pair-form').hidden = false; });
+  } catch (e) { $('scan-result').innerHTML = '<p class="err">扫描失败：' + e.message + '</p>'; }
+};
+let selected = null;
+
+// 配对
+$('btn-pair').onclick = async () => {
+  if (!selected) return;
+  try {
+    await api('POST', '/api/pair', { ip: selected.ip, port: +selected.port, hostname: selected.host, api_key: $('pair-key').value });
+    $('pair-form').hidden = true;
+    await refreshTarget();
+    await loadTasks();
+  } catch (e) { alert('配对失败：' + e.message); }
+};
+
+// 取消配对
+$('btn-unpair').onclick = async () => {
+  await api('POST', '/api/unpair');
+  await refreshTarget();
+  $('tasks').innerHTML = '';
+};
+
+// 任务列表
+async function loadTasks() {
+  try {
+    const tasks = await api('GET', '/api/tasks');
+    $('tasks').innerHTML = tasks.map(t =>
+      `<button data-id="${t.id}">▶ ${t.display_name}</button>`).join(' ') || '<p class="muted">无任务</p>';
+    document.querySelectorAll('#tasks button').forEach(b =>
+      b.onclick = () => trigger(b.dataset.id));
+  } catch (e) { $('tasks').innerHTML = '<p class="err">加载失败：' + e.message + '</p>'; }
+}
+$('btn-load-tasks').onclick = loadTasks;
+
+// 触发 + 轮询
+let pollTimer = null;
+async function trigger(taskId) {
+  try {
+    const { job_id } = await api('POST', '/api/trigger', { task_id: taskId });
+    $('run-status').textContent = `任务已触发，job=${job_id}，运行中…`;
+    pollStatus(job_id);
+  } catch (e) { $('run-status').innerHTML = `<span class="err">触发失败：${e.message}</span>`; }
+}
+function pollStatus(jobId) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const st = await api('GET', '/api/status?job_id=' + jobId);
+      const terminal = ['done','timeout','failed','aborted'].includes(st.state);
+      $('run-status').innerHTML = `job=${jobId} 状态：<strong>${st.state}</strong>`;
+      if (terminal) { clearInterval(pollTimer); loadJobs(); }
+    } catch (e) { /* 暂时错误，继续轮询 */ }
+  }, 10000);
+}
+
+// 历史
+async function loadJobs() {
+  try {
+    const jobs = await api('GET', '/api/jobs');
+    $('jobs').innerHTML = jobs.map(j =>
+      `<li><span class="tag">${j.state}</span> job=${j.job_id} task=${j.task_id}</li>`).join('') || '<li class="muted">无</li>';
+  } catch (e) { $('jobs').innerHTML = '<li class="err">加载失败</li>'; }
+}
+$('btn-load-jobs').onclick = loadJobs;
+
+// 初始化
+refreshTarget().then(() => { /* 若已配对，自动加载任务 */ if ($('btn-unpair').hidden === false) loadTasks(); });
+loadJobs();
+</script>
 </body>
 </html>

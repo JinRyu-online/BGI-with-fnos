@@ -21,15 +21,15 @@ def test_home_page_renders(tmp_path):
     assert "BetterGI" in r.text  # 页面标题之类
 
 
-def test_home_page_shows_no_target_when_unpaired(tmp_path):
+def test_home_page_shows_scan_prompt_when_unpaired(tmp_path):
     client = TestClient(_app(tmp_path))
     r = client.get("/")
-    # 未配对时应提示去扫描设备
-    assert "未配对" in r.text or "扫描" in r.text
+    # 未配对时页面提供「扫描」入口（GUI 为 JS 驱动，目标通过 /api/config 异步获取）
+    assert "扫描" in r.text
 
 
-def test_home_page_shows_target_when_paired(tmp_path):
-    # 预置一个已配对的目标
+def test_config_endpoint_returns_paired_target(tmp_path):
+    # 预置一个已配对的目标，/api/config 应返回之（GUI 据此渲染目标信息）
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
@@ -38,6 +38,7 @@ def test_home_page_shows_target_when_paired(tmp_path):
     s.save(cfg)
 
     client = TestClient(_app(tmp_path))
-    r = client.get("/")
-    assert "192.168.1.100" in r.text
-    assert "DESKTOP-X" in r.text
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    assert r.json()["default_target"]["ip"] == "192.168.1.100"
+    assert r.json()["default_target"]["hostname"] == "DESKTOP-X"
