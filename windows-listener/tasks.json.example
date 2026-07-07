@@ -1,0 +1,16 @@
+[
+  {
+    "id": "daily",
+    "display_name": "日常一条龙",
+    "groups": ["日常一条龙", "关闭游戏"],
+    "timeout_min": 90,
+    "after_done": "sleep"
+  },
+  {
+    "id": "abyss",
+    "display_name": "深渊刷本",
+    "groups": ["深渊", "关闭游戏"],
+    "timeout_min": 60,
+    "after_done": "sleep"
+  }
+]

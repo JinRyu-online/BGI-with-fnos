@@ -1,0 +1,121 @@
+"""监听器入口模块。
+
+用法：
+  pythonw.exe listener.py            正常启动（由计划任务调用）
+  python listener.py --show-key      重新弹出密钥窗口
+
+启动流程：
+  1. 加载 config.toml（首启自动生成密钥）与 tasks.json；
+  2. 装配鉴权、任务存储、启动器、应用依赖；
+  3. 首次启动（无 .first_run_done 标记）或带 --show-key 时，弹窗显示密钥；
+  4. uvicorn 启动 HTTP 服务。
+
+密钥弹窗使用 tkinter，运行于主线程（阻塞至用户关闭），随后才启动 uvicorn。
+因此「首次启动」会在用户关闭弹窗后才开始服务——首次安装时用户在场，可接受。
+后续开机因标记已存在，直接启动服务，不弹窗。
+"""
+from __future__ import annotations
+
+import logging
+import socket
+import sys
+import tkinter as tk
+from pathlib import Path
+
+import uvicorn
+
+from app import AppDeps, create_app
+from auth import AuthState
+from config import ListenerConfig
+from launcher import Launcher
+from state import JobStore
+from tasks import TaskRegistry
+
+VERSION = "1.0.0"
+# 所有运行时文件均位于本脚本所在目录。
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "config.toml"
+TASKS_PATH = BASE_DIR / "tasks.json"
+TRUSTED_PATH = BASE_DIR / "trusted.json"           # 已信任 IP 持久化
+FIRST_RUN_MARKER = BASE_DIR / ".first_run_done"    # 首次启动标记
+
+log = logging.getLogger("bgi_trigger")
+
+
+def _show_key_window(api_key: str) -> None:
+    """弹出密钥窗口供用户复制到 NAS 应用。无显示环境时退化为打印到 stderr。"""
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        # 无显示环境（无头）：退化为 stderr 输出。
+        print(f"[BGI-Trigger] API key (no display): {api_key}", file=sys.stderr)
+        return
+    root.title("BetterGI Trigger — 密钥")
+    tk.Label(root, text="NAS 应用配对时粘贴此密钥：", padx=16, pady=(12, 4)).pack()
+    entry = tk.Entry(root, width=48, font=("Consolas", 10))
+    entry.insert(0, api_key)
+    entry.config(state="readonly")
+    entry.pack(padx=16, pady=4)
+
+    def _copy():
+        """复制密钥到剪贴板。"""
+        root.clipboard_clear()
+        root.clipboard_append(api_key)
+
+    tk.Button(root, text="复制密钥", command=_copy).pack(pady=4)
+    tk.Button(root, text="关闭并启动服务", command=root.destroy).pack(pady=(4, 12))
+    root.mainloop()
+
+
+def main() -> int:
+    """入口主函数：装配依赖并启动 uvicorn。"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    show_key = "--show-key" in sys.argv
+    config = ListenerConfig.load(CONFIG_PATH)
+    tasks = TaskRegistry.load(TASKS_PATH)
+
+    auth = AuthState(
+        api_key=config.auth.api_key,
+        trusted_ips=config.auth.trusted_ips,
+        store_path=TRUSTED_PATH,
+    )
+
+    # 首次启动或显式要求时，弹窗显示密钥。
+    first_run = not FIRST_RUN_MARKER.exists()
+    if show_key or first_run:
+        _show_key_window(config.auth.api_key)
+        if first_run:
+            FIRST_RUN_MARKER.touch()
+
+    jobs = JobStore(keep_history=config.execution.keep_history)
+    launcher = Launcher(
+        bettergi_exe=config.bettergi.exe_path,
+        game_processes=config.bettergi.game_processes,
+        log_path=config.bettergi.log_path,
+        log_done_keyword=config.bettergi.log_done_keyword,
+        grace_seconds=config.execution.grace_seconds,
+        jobs=jobs,
+    )
+
+    deps = AppDeps(
+        hostname=socket.gethostname(),
+        version=VERSION,
+        tasks=tasks,
+        auth=auth,
+        jobs=jobs,
+        launch=launcher,
+    )
+    app = create_app(deps)
+
+    log.info("serving on %s:%d", config.server.host, config.server.port)
+    # log_level=warning：屏蔽 uvicorn 默认的访问日志噪声（我们自己的日志更精确）。
+    uvicorn.run(app, host=config.server.host, port=config.server.port, log_level="warning")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

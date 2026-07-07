@@ -1,0 +1,27 @@
+[server]
+host = "0.0.0.0"
+port = 8765
+
+[auth]
+# Leave empty: a random key is generated on first run and shown in a popup window.
+# Fill both sides (here + NAS app) with the same value to use a custom key.
+api_key = ""
+trusted_ips = []
+
+[bettergi]
+# Path to BetterGI.exe. Leave empty to skip launching (dev); set to the real path in production.
+exe_path = ""
+# BetterGI scheduler config file path (optional auto-discovery of group names). Leave empty in dev.
+config_path = ""
+# BetterGI log file path (enables completion detection C). Leave empty in dev -> C disabled.
+log_path = ""
+# Keyword in the BetterGI log that signals a group finished. Leave empty -> C disabled.
+log_done_keyword = ""
+# Game process names watched for completion detection B.
+game_processes = ["YuanShen.exe", "GenshinImpact.exe"]
+
+[execution]
+default_timeout_min = 90
+default_after_done = "sleep"
+grace_seconds = 30
+keep_history = 20
