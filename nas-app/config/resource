@@ -1,3 +1,20 @@
 {
-  "ports": [8000]
+  "docker-project": {
+    "projects": [
+      {
+        "name": "bgi-trigger",
+        "path": "docker"
+      }
+    ]
+  },
+  "data-share": {
+    "shares": [
+      {
+        "name": "bgi-trigger"
+      },
+      {
+        "name": "bgi-trigger/data"
+      }
+    ]
+  }
 }

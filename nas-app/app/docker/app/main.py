@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import psutil
@@ -52,11 +51,9 @@ class TriggerBody(BaseModel):
 
 
 def _default_config_path() -> str:
-    """配置文件路径：优先用 fnOS 注入的 TRIM_PKGETC，否则本地 etc/config.json（开发）。"""
-    base = os.environ.get("TRIM_PKGETC")
-    if base:
-        return str(Path(base) / "config.json")
-    return str(Path(__file__).resolve().parent.parent / "etc" / "config.json")
+    """配置文件路径：容器内由 compose 注入 BGI_DATA_DIR=/data；
+    开发环境回退到源码旁的 etc/config.json。"""
+    return Settings.default_path()
 
 
 def _default_scanner(subnet: str | None, port: int) -> list[dict]:

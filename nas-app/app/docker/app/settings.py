@@ -11,7 +11,9 @@
 """
 from __future__ import annotations
 
+import copy
 import json
+import os
 from pathlib import Path
 
 # 默认配置：未配置文件或字段缺失时用此兜底。
@@ -34,6 +36,15 @@ class Settings:
 
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
+
+    @classmethod
+    def default_path(cls) -> str:
+        """默认配置文件路径：BGI_DATA_DIR/config.json（容器内由 compose 注入 /data）；
+        开发环境（无 BGI_DATA_DIR）回退到源码旁的 etc/config.json。"""
+        base = os.environ.get("BGI_DATA_DIR")
+        if base:
+            return str(Path(base) / "config.json")
+        return str(Path(__file__).resolve().parent.parent / "etc" / "config.json")
 
     def load(self) -> dict:
         """加载配置：文件不存在或部分缺失时，与 DEFAULT_CONFIG 深度合并兜底。"""
@@ -70,5 +81,4 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def _deep_copy(d):
     """简易深拷贝（配置仅含 dict/list/标量）。"""
-    import copy
     return copy.deepcopy(d)

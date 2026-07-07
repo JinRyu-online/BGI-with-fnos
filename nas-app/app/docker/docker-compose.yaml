@@ -1,22 +1,22 @@
-# NAS 应用 docker-compose 编排。
+# fnOS Docker 应用编排。
+# 由 fnOS appcenter 依据 config/resource 中的 docker-project 声明统一启停，
+# cmd/main 仅负责 status 检查。容器名须与 cmd/main 中的 container_name 一致。
+#
 # 关键点：
 # 1. network_mode: host —— 扫描局域网必需（容器需直接看到宿主 LAN 子网）。
-# 2. 挂载 fnOS 应用的 etc/var 目录到容器，使配置与运行数据持久化。
-#    路径由 fnOS 通过环境变量 TRIM_PKGETC / TRIM_PKGVAR 提供（见 cmd/main）。
-# 3. 镜像名 bgi-trigger-nas；构建上下文为本目录（Dockerfile 同级）。
+#    若 fnOS 不允许 host 网络，改为 bridge 并在 wizard/应用设置里填子网（牺牲自动发现）。
+# 2. 数据持久化：挂载 data-share（bgi-trigger/data）到 /data，
+#    应用经 BGI_DATA_DIR=/data 读写 config.json / jobs.json。
 services:
   bgi-trigger:
-    image: bgi-trigger-nas:latest
+    image: bgi-trigger:latest
     container_name: bgi-trigger
     network_mode: host
     restart: unless-stopped
     environment:
-      # 由 cmd/main 启动时注入实际路径
-      TRIM_PKGETC: ${TRIM_PKGETC}
-      TRIM_PKGVAR: ${TRIM_PKGVAR}
+      BGI_DATA_DIR: /data
     volumes:
-      - ${TRIM_PKGETC}:/etc/app
-      - ${TRIM_PKGVAR}:/var/app
+      - /var/apps/bgi-trigger/shares/bgi-trigger/data:/data
     build:
       context: .
       dockerfile: Dockerfile

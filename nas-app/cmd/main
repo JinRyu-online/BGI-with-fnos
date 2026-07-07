@@ -1,35 +1,43 @@
 #!/bin/bash
-# 应用生命周期主脚本：fnOS 通过 `cmd/main start|stop|status` 调用。
-# 通过 docker compose 管理容器。路径使用 fnOS 注入的环境变量，不硬编码。
+# 应用生命周期主脚本。
+# ⚠️ Docker 类应用：容器的启动/停止由 fnOS appcenter 统一管理（依据 config/resource
+#    中的 docker-project 声明），因此 start/stop 在此处为空操作；仅 status 检查容器状态。
+# 容器名须与 app/docker/docker-compose.yaml 中的 container_name 一致。
 
-set -eu
+FILE_PATH="${TRIM_APPDEST}/docker/docker-compose.yaml"
 
-# TRIM_APPDEST：应用已安装文件目录（含 app/docker/docker-compose.yaml）。
-APPDEST="${TRIM_APPDEST:-/var/apps/bgi-trigger}"
-COMPOSE_FILE="$APPDEST/app/docker/docker-compose.yaml"
+is_docker_running () {
+    DOCKER_NAME=""
 
-# 导出 etc/var 路径供 docker-compose 读取（见 docker-compose.yaml 中的 ${TRIM_PKGETC}）。
-export TRIM_PKGETC="${TRIM_PKGETC:-$APPDEST/etc}"
-export TRIM_PKGVAR="${TRIM_PKGVAR:-$APPDEST/var}"
+    if [ -f "$FILE_PATH" ]; then
+        DOCKER_NAME=$(cat "$FILE_PATH" | grep "container_name" | awk -F ':' '{print $2}' | xargs)
+        echo "DOCKER_NAME is set to: $DOCKER_NAME"
+    fi
 
-case "${1:-}" in
-  start)
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    if [ -n "$DOCKER_NAME" ]; then
+        docker inspect "$DOCKER_NAME" | grep -q "\"Status\": \"running\"," || exit 1
+        return
+    fi
+}
+
+case $1 in
+start)
+    # Docker 应用由 appcenter 启动，此处无需操作。成功 exit 0，失败 exit 1。
+    exit 0
     ;;
-  stop)
-    docker compose -f "$COMPOSE_FILE" down
+stop)
+    # Docker 应用由 appcenter 停止，此处无需操作。
+    exit 0
     ;;
-  status)
-    if docker compose -f "$COMPOSE_FILE" ps --status running | grep -q bgi-trigger; then
-      echo "running"
-      exit 0
+status)
+    # 检查容器运行状态：运行中 exit 0，未运行 exit 3。
+    if is_docker_running; then
+        exit 0
     else
-      echo "stopped"
-      exit 1
+        exit 3
     fi
     ;;
-  *)
-    echo "usage: $0 {start|stop|status}" >&2
-    exit 2
+*)
+    exit 1
     ;;
 esac

@@ -49,8 +49,9 @@ class HistoryStore:
 
 
 def default_history_path() -> str:
-    """默认历史文件路径：TRIM_PKGVAR/jobs.json，开发回退到源码旁 var/。"""
-    base = os.environ.get("TRIM_PKGVAR")
+    """默认历史文件路径：BGI_DATA_DIR/jobs.json（容器内由 compose 注入 /data）；
+    开发环境回退到源码旁的 var/jobs.json。"""
+    base = os.environ.get("BGI_DATA_DIR")
     if base:
         return str(Path(base) / "jobs.json")
     return str(Path(__file__).resolve().parent.parent / "var" / "jobs.json")
