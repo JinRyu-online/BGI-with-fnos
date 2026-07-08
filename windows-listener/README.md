@@ -36,6 +36,36 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 4. 编辑 `tasks.json`：`groups` 须与 BetterGI「全自动-调度器」里的组名一致。
 5. 首次启动会弹窗显示 API 密钥（复制到 NAS 应用）；之后想再看：`venv\Scripts\pythonw.exe listener.py --show-key`。
 
+## 依赖与镜像（国内友好）
+
+`install.bat` 的依赖安装策略：
+
+- **镜像**：默认走清华 PyPI 镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`，国内下载快。
+- **包管理器**：优先用 **uv**（Python 版 pnpm，Astral 出品，安装快、并发下载），uv 不可用时自动回退到 pip。
+  - uv 先由 `pip` 装入 venv，再由 uv 安装 `requirements.txt`。
+  - 镜像通过环境变量 `UV_INDEX_URL` 注入（uv 原生支持）。
+
+切换镜像只需改 `install.bat` 顶部的 `MIRROR` 变量，可选：
+
+| 镜像 | 地址 |
+|---|---|
+| 清华（默认） | `https://pypi.tuna.tsinghua.edu.cn/simple` |
+| 阿里云 | `https://mirrors.aliyun.com/pypi/simple` |
+| 腾讯云 | `https://mirrors.cloud.tencent.com/pypi/simple` |
+
+手动装依赖（不走 install.bat）：
+
+```bash
+# 用 uv（推荐，快）
+python -m venv venv
+venv\Scripts\pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
+set UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+venv\Scripts\python -m uv pip install -r requirements.txt
+
+# 或用 pip + 镜像
+venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
 ## 开发
 
 ```bash
