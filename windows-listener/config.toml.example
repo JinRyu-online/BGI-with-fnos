@@ -1,27 +1,43 @@
+# BetterGI Trigger Listener 配置文件
+# 首次启动若 api_key 为空，会自动生成随机密钥并回写、弹窗显示。
+# 路径反斜杠需双写（如 "D:\\Games\\BetterGI\\BetterGI.exe"），或用正斜杠。
+
 [server]
+# HTTP 监听地址。0.0.0.0 表示监听所有网卡（局域网可达）。
 host = "0.0.0.0"
+# 监听端口。NAS 扫描默认探测此端口，需在 Windows 防火墙放行。
 port = 8765
 
 [auth]
-# Leave empty: a random key is generated on first run and shown in a popup window.
-# Fill both sides (here + NAS app) with the same value to use a custom key.
+# API 密钥。留空：首次启动自动生成 32 位随机密钥并弹窗显示（复制到 NAS 应用）。
+# 也可手动填入自定义密钥，但需与 NAS 应用配置里的一致。
 api_key = ""
+# 已信任 IP 列表。首次收到「带正确密钥」的请求时自动学习来源 IP，无需手填。
+# 手动填可预授权，如 ["192.168.1.50"]。
 trusted_ips = []
 
 [bettergi]
-# Path to BetterGI.exe. Leave empty to skip launching (dev); set to the real path in production.
+# BetterGI.exe 的完整路径。必填（生产环境）。留空则触发会失败（仅开发调试用）。
+# 示例：exe_path = "D:\\software\\BetterGI\\BetterGI.exe"
 exe_path = ""
-# BetterGI scheduler config file path (optional auto-discovery of group names). Leave empty in dev.
+# BetterGI 调度器配置文件路径（可选，用于自动读取组名预填任务）。留空则不自动读取。
 config_path = ""
-# BetterGI log file path (enables completion detection C). Leave empty in dev -> C disabled.
+# BetterGI 日志文件路径。填了才启用完成判定 C（日志关键字）。
+# 留空 -> 完成判定只用 B（游戏进程退出）+ 超时兜底。
 log_path = ""
-# Keyword in the BetterGI log that signals a group finished. Leave empty -> C disabled.
+# 日志中表示调度组执行完成的关键字。需配合 log_path 使用，留空 -> C 禁用。
 log_done_keyword = ""
-# Game process names watched for completion detection B.
+# 完成判定 B 监视的游戏进程名。国服 YuanShen.exe，国际服 GenshinImpact.exe。
+# 二者都列可兼容；若玩其他服请改成实际进程名。
 game_processes = ["YuanShen.exe", "GenshinImpact.exe"]
 
 [execution]
+# 任务默认最大执行时长（分钟）。超时则标记 timeout 并尝试清理。
 default_timeout_min = 90
+# 任务默认收尾动作：sleep 休眠(默认,可被WOL唤醒) / shutdown 关机 / lock 锁屏 / none 不动作。
+# 休眠需 Windows 已启用：管理员运行 powercfg /hibernate on
 default_after_done = "sleep"
+# 完成判定命中后的反悔窗口（秒）。期间可调 /abort 阻止收尾动作。
 grace_seconds = 30
+# 内存中保留的最近任务历史条数（供 /status 与 NAS 展示）。
 keep_history = 20
