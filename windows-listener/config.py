@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 import secrets
 import tomllib
 from dataclasses import dataclass, field
@@ -92,7 +93,7 @@ class ListenerConfig:
         if not merged["auth"]["api_key"]:
             # 首次启动：生成 16 字节随机数 → 32 位 hex 字符串作为密钥
             merged["auth"]["api_key"] = secrets.token_hex(16)
-            _dump_toml(merged, path)
+            _persist_api_key(path, merged)
         return cls(
             server=Server(**merged["server"]),
             auth=Auth(**merged["auth"]),
@@ -111,6 +112,33 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             out[k] = override.get(k, v)
     return out
+
+
+def _persist_api_key(path: Path, data: dict) -> None:
+    """把生成的 api_key 写回配置文件，尽量保留原有注释。
+
+    若文件已存在且含 api_key 行：只替换该行的值（注释与结构原样保留）。
+    否则（文件不存在或无 api_key 行）：整体重写为裸配置（无注释，但功能完整）。
+    """
+    key = data["auth"]["api_key"]
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+        updated = _replace_api_key_line(text, key)
+        if updated is not None:
+            path.write_text(updated, encoding="utf-8")
+            return
+    _dump_toml(data, path)
+
+
+# 匹配独立的 api_key = "..." 行（含行尾注释），用于就地替换值、保留注释。
+_API_KEY_LINE = re.compile(r'(^api_key\s*=\s*)"[^"]*"(\s*(?:#.*)?)$', re.MULTILINE)
+
+
+def _replace_api_key_line(text: str, key: str) -> str | None:
+    """把文本中 api_key 行的值替换为 key；未找到该行返回 None。"""
+    if not _API_KEY_LINE.search(text):
+        return None
+    return _API_KEY_LINE.sub(lambda m: f'{m.group(1)}"{key}"{m.group(2)}', text)
 
 
 def _dump_toml(data: dict, path: Path) -> None:

@@ -54,3 +54,41 @@ def test_first_run_generates_and_persists_api_key(tmp_path):
     # reloading does NOT regenerate
     config2 = ListenerConfig.load(cfg_path)
     assert config2.auth.api_key == config.auth.api_key
+
+
+def test_first_run_preserves_existing_comments(tmp_path):
+    # 配置文件带中文注释 + [auth] api_key 为空；首启生成密钥应保留注释
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        "# 我的配置\n"
+        "[server]\n"
+        "host = \"0.0.0.0\"\n"
+        "port = 8765\n"
+        "\n"
+        "[auth]\n"
+        "# 密钥留空则自动生成\n"
+        "api_key = \"\"\n"
+        "trusted_ips = []\n",
+        encoding="utf-8",
+    )
+
+    config = ListenerConfig.load(cfg_path)
+
+    text = cfg_path.read_text(encoding="utf-8")
+    # 注释保留
+    assert "# 我的配置" in text
+    assert "# 密钥留空则自动生成" in text
+    # 新密钥已写入，空值被替换
+    assert config.auth.api_key in text
+    assert 'api_key = ""' not in text
+
+
+def test_first_run_when_file_missing_writes_bare_config(tmp_path):
+    # 文件不存在时首启：生成密钥并写出裸配置（无注释，但功能完整）
+    cfg_path = tmp_path / "config.toml"
+
+    config = ListenerConfig.load(cfg_path)
+
+    assert config.auth.api_key != ""
+    reloaded_raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    assert reloaded_raw["auth"]["api_key"] == config.auth.api_key
