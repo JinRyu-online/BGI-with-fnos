@@ -18,3 +18,15 @@ nas-app/app/docker/.build/
 
 # fnpack 打包产物
 *.fpk
+
+# Apifox AI Agent skills（本地工具安装，npx skills add 生成，勿提交）
+.agents/
+skills/
+skills-lock.json
+.claude/skills/
+.codebuddy/
+.hermes/
+.lingma/
+.qoder/
+.trae/
+.windsurf/

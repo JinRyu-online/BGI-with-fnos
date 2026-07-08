@@ -1,0 +1,257 @@
+openapi: 3.0.3
+info:
+  title: BetterGI Trigger Listener API
+  version: 1.0.0
+  description: |
+    Windows 端 BetterGI 触发监听器接口。
+
+    NAS 应用通过这些接口扫描发现监听器、拉取任务清单、触发 BetterGI 调度器组、
+    轮询任务状态并中止任务。
+
+    鉴权：除 `/health` 外，所有接口需在请求头携带 `Authorization: Bearer <api_key>`。
+    api_key 在监听器首次启动时自动生成（弹窗显示），也可在 `config.toml` 手填。
+    来源 IP 首次以正确密钥访问时自动加入信任列表。
+servers:
+  - url: http://127.0.0.1:8765
+    description: 本机访问
+  - url: http://{windows_ip}:8765
+    description: 局域网访问（替换为 Windows 实际 IP）
+    variables:
+      windows_ip:
+        default: 192.168.1.100
+        description: Windows 监听器所在机器的局域网 IP
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API 密钥（首启生成），格式 `Bearer <api_key>`。
+  schemas:
+    Health:
+      type: object
+      description: 服务身份签名，供 NAS 扫描识别。
+      properties:
+        service: { type: string, example: bgi-trigger }
+        hostname: { type: string, example: DESKTOP-WIN }
+        version: { type: string, example: 1.0.0 }
+      required: [service, hostname, version]
+    Task:
+      type: object
+      description: 可触发任务（对应 BetterGI 调度器组）。
+      properties:
+        id: { type: string, example: daily }
+        display_name: { type: string, example: 日常一条龙 }
+        groups:
+          type: array
+          items: { type: string }
+          example: [日常一条龙, 关闭游戏]
+          description: BetterGI 调度器组名，须与 BetterGI 配置一致。
+        timeout_min: { type: integer, example: 90 }
+        after_done:
+          type: string
+          enum: [sleep, shutdown, lock, none]
+          example: sleep
+          description: 任务收尾动作。
+      required: [id, display_name, groups, timeout_min, after_done]
+    TriggerRequest:
+      type: object
+      properties:
+        task_id: { type: string, example: daily }
+      required: [task_id]
+    TriggerResponse:
+      type: object
+      properties:
+        job_id: { type: string, example: e4f272964e63 }
+      required: [job_id]
+    JobStatus:
+      type: object
+      properties:
+        id: { type: string, example: e4f272964e63 }
+        task_id: { type: string, example: daily }
+        groups:
+          type: array
+          items: { type: string }
+          example: [日常一条龙, 关闭游戏]
+        state:
+          type: string
+          enum: [running, completing, done, timeout, failed, aborted]
+          example: done
+          description: |
+            running=执行中；completing=完成判定命中后的 30s 反悔窗口；
+            done/timeout/failed/aborted=终态。
+        completion_reason:
+          type: string
+          example: game_exited
+          description: 命中原因（game_exited / log_keyword / timeout / error）。
+      required: [id, task_id, state]
+    Error:
+      type: object
+      properties:
+        detail: { type: string, example: unauthorized }
+paths:
+  /health:
+    get:
+      tags: [发现]
+      summary: 服务身份签名
+      description: 免鉴权。NAS 扫描局域网时调此接口识别 BetterGI 监听器（校验 service 字段）。
+      security: []
+      responses:
+        '200':
+          description: 服务身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              examples:
+                ok:
+                  value: { service: bgi-trigger, hostname: DESKTOP-WIN, version: 1.0.0 }
+  /tasks:
+    get:
+      tags: [任务]
+      summary: 拉取任务清单
+      description: 返回监听器 `tasks.json` 中定义的全部可触发任务。
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Task' }
+              examples:
+                two_tasks:
+                  value:
+                    - id: daily
+                      display_name: 日常一条龙
+                      groups: [日常一条龙, 关闭游戏]
+                      timeout_min: 90
+                      after_done: sleep
+                    - id: abyss
+                      display_name: 深渊刷本
+                      groups: [深渊, 关闭游戏]
+                      timeout_min: 60
+                      after_done: sleep
+        '401':
+          description: 密钥错误或缺失
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }
+  /trigger:
+    post:
+      tags: [执行]
+      summary: 触发任务
+      description: |
+        启动指定任务：监听器拉起 `BetterGI.exe --startGroups <组名...>`，
+        在守护线程中执行，立即返回 job_id。同一时刻仅允许一个任务运行。
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TriggerRequest' }
+            examples:
+              daily:
+                value: { task_id: daily }
+      responses:
+        '202':
+          description: 已启动
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TriggerResponse' }
+              examples:
+                accepted: { value: { job_id: e4f272964e63 } }
+        '401':
+          description: 密钥错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }
+        '404':
+          description: 未知任务 id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                not_found: { value: { detail: "task not found: nope" } }
+        '409':
+          description: 已有任务在跑
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                busy: { value: { detail: "a job is already running" } }
+  /status:
+    get:
+      tags: [执行]
+      summary: 查询任务状态
+      description: 按 job_id 查任务状态（当前或历史）。NAS 触发后每 10 秒轮询此接口。
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: query
+          name: job_id
+          required: true
+          schema: { type: string }
+          example: e4f272964e63
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobStatus' }
+              examples:
+                running:
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: running, completion_reason: "" }
+                done:
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: done, completion_reason: game_exited }
+                failed:
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: failed, completion_reason: error }
+        '401':
+          description: 密钥错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }
+        '404':
+          description: 任务不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                not_found: { value: { detail: "job not found" } }
+  /abort:
+    post:
+      tags: [执行]
+      summary: 中止当前任务
+      description: |
+        中止当前任务。常用于任务进入 `completing` 反悔窗口时阻止收尾动作
+        （如阻止休眠/关机）。终态后调用返回 409。
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: 已中止
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aborted: { type: boolean, example: true }
+              examples:
+                aborted: { value: { aborted: true } }
+        '401':
+          description: 密钥错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }
+        '409':
+          description: 无活动任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                no_job: { value: { detail: "no active job" } }
