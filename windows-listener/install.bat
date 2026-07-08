@@ -1,13 +1,13 @@
 @echo off
-chcp 65001 >nul
 REM ============================================================
-REM BetterGI Trigger Listener â€” Windows å®‰è£…è„šæœ¬
-REM ä½œç”¨ï¼šå»ºè™šæ‹ŸçŽ¯å¢ƒ â†’ è£…ä¾èµ– â†’ ç”Ÿæˆé…ç½® â†’ æ³¨å†Œè®¡åˆ’ä»»åŠ¡
-REM ç”¨æ³•ï¼šå³é”®ã€Œä»¥ç®¡ç†å‘˜èº«ä»½è¿è¡Œã€æœ¬è„šæœ¬
+REM BetterGI Trigger Listener - Windows °²×°½Å±¾
+REM ×÷ÓÃ£º½¨ÐéÄâ»·¾³ -> ×°ÒÀÀµ -> Éú³ÉÅäÖÃ -> ×¢²á¼Æ»®ÈÎÎñ
+REM ÓÃ·¨£ºÓÒ¼ü¡¸ÒÔ¹ÜÀíÔ±Éí·ÝÔËÐÐ¡¹±¾½Å±¾
 REM
-REM ä¾èµ–ä¸‹è½½ï¼šé»˜è®¤èµ°æ¸…åŽ PyPI é•œåƒï¼ˆå›½å†…å‹å¥½ï¼‰ï¼›
-REM           åŒ…ç®¡ç†å™¨ä¼˜å…ˆç”¨ uvï¼ˆPython ç‰ˆ pnpmï¼Œå¿«ï¼‰ï¼Œ
-REM           uv ä¸å¯ç”¨æ—¶è‡ªåŠ¨å›žé€€åˆ° pipã€‚
+REM ÒÀÀµÏÂÔØ£ºÄ¬ÈÏ×ßÇå»ª PyPI ¾µÏñ£¨¹úÄÚÓÑºÃ£©£»
+REM           °ü¹ÜÀíÆ÷ÓÅÏÈÓÃ uv£¨Python °æ pnpm£¬¿ì£©£¬
+REM           uv ²»¿ÉÓÃÊ±×Ô¶¯»ØÍËµ½ pip¡£
+REM ×¢Òâ£º±¾ÎÄ¼þÒÔ GBK ±àÂë±£´æ£¬ÎðÓÃ chcp 65001£¨»áÆÆ»µÖÐÎÄÐÐ½âÎö£©¡£
 REM ============================================================
 setlocal
 
@@ -19,81 +19,79 @@ set PYW=%VENV%\Scripts\pythonw.exe
 set SCRIPT=%BASE%\listener.py
 set TASKNAME=BGI-Trigger-Listener
 
-REM å›½å†… PyPI é•œåƒï¼ˆæ¸…åŽï¼‰ã€‚å¦‚éœ€æ›´æ¢ï¼Œæ”¹æ­¤å¤„å³å¯ï¼š
-REM   é˜¿é‡Œäº‘  https://mirrors.aliyun.com/pypi/simple
-REM   è…¾è®¯äº‘  https://mirrors.cloud.tencent.com/pypi/simple
+REM ¹úÄÚ PyPI ¾µÏñ£¨Çå»ª£©¡£ÈçÐè¸ü»»£¬¸Ä´Ë´¦¼´¿É£º
+REM   °¢ÀïÔÆ  https://mirrors.aliyun.com/pypi/simple
+REM   ÌÚÑ¶ÔÆ  https://mirrors.cloud.tencent.com/pypi/simple
 set MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
 set TRUSTED=pypi.tuna.tsinghua.edu.cn
 
-REM uv è¯»å–æ­¤çŽ¯å¢ƒå˜é‡ä½œä¸ºåŒ…ç´¢å¼•ï¼ˆç­‰ä»·äºŽ --indexï¼‰
+REM uv ¶ÁÈ¡´Ë»·¾³±äÁ¿×÷Îª°üË÷Òý£¨µÈ¼ÛÓÚ --index£©
 set UV_INDEX_URL=%MIRROR%
 set UV_HTTP_TIMEOUT=120
 
-REM ---------- 1. ç®¡ç†å‘˜æ£€æµ‹ ----------
+REM ---------- 1. ¹ÜÀíÔ±¼ì²â ----------
 net session >nul 2>&1
 if errorlevel 1 (
-  echo [é”™è¯¯] è¯·ä»¥ç®¡ç†å‘˜èº«ä»½è¿è¡Œæ­¤è„šæœ¬ï¼ˆè®¡åˆ’ä»»åŠ¡éœ€æœ€é«˜æƒé™ï¼‰ã€‚
+  echo [´íÎó] ÇëÒÔ¹ÜÀíÔ±Éí·ÝÔËÐÐ´Ë½Å±¾¡£
   pause
   exit /b 1
 )
 
-REM ---------- 2. åˆ›å»ºè™šæ‹ŸçŽ¯å¢ƒ ----------
+REM ---------- 2. ´´½¨ÐéÄâ»·¾³ ----------
 if not exist "%VENV%" (
-  echo [1/5] åˆ›å»ºè™šæ‹ŸçŽ¯å¢ƒ...
+  echo [1/5] ´´½¨ÐéÄâ»·¾³...
   python -m venv "%VENV%"
 ) else (
-  echo [1/5] è™šæ‹ŸçŽ¯å¢ƒå·²å­˜åœ¨ï¼Œè·³è¿‡åˆ›å»ºã€‚
+  echo [1/5] ÐéÄâ»·¾³ÒÑ´æÔÚ£¬Ìø¹ý´´½¨¡£
 )
 
-REM ---------- 3. å®‰è£…ä¾èµ– ----------
-echo [2/5] å®‰è£…ä¾èµ–ï¼ˆé•œåƒï¼š%MIRROR%ï¼‰...
-echo       å…ˆå°è¯• uvï¼ˆæ›´å¿«çš„åŒ…ç®¡ç†å™¨ï¼‰...
+REM ---------- 3. °²×°ÒÀÀµ ----------
+echo [2/5] °²×°ÒÀÀµ£¨¾µÏñ£º%MIRROR%£©
+echo       ÏÈ³¢ÊÔ uv£¨¸ü¿ìµÄ°ü¹ÜÀíÆ÷£©...
 "%PY%" -m pip install uv -i %MIRROR% --trusted-host %TRUSTED% >nul 2>&1
-if errorlevel 1 goto :pipfallback
+if errorlevel 1 goto pipfallback
 
 "%PY%" -m uv pip install -r "%BASE%\requirements.txt"
-if errorlevel 1 goto :pipfallback
-goto :depsdone
+if errorlevel 1 goto pipfallback
+goto depsdone
 
 :pipfallback
-echo       uv ä¸å¯ç”¨ï¼Œå›žé€€åˆ° pip ç›´æŽ¥å®‰è£…...
+echo       uv ²»¿ÉÓÃ£¬»ØÍËµ½ pip Ö±½Ó°²×°...
 "%PY%" -m pip install -r "%BASE%\requirements.txt" -i %MIRROR% --trusted-host %TRUSTED%
 if errorlevel 1 (
-  echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·æ£€æŸ¥ç½‘ç»œæˆ–é•œåƒã€‚
+  echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂç»ò¾µÏñ¡£
   pause
   exit /b 1
 )
 
 :depsdone
-echo [2/5] ä¾èµ–å®‰è£…å®Œæˆã€‚
+echo [2/5] ÒÀÀµ°²×°Íê³É¡£
 
-REM ---------- 4. ç”Ÿæˆé…ç½®æ–‡ä»¶ï¼ˆä»Ž .exampleï¼‰ ----------
-echo [3/5] ç”Ÿæˆé…ç½®æ–‡ä»¶...
+REM ---------- 4. Éú³ÉÅäÖÃÎÄ¼þ£¨´Ó .example£© ----------
+echo [3/5] Éú³ÉÅäÖÃÎÄ¼þ...
 if not exist "%BASE%\config.toml" copy "%BASE%\config.toml.example" "%BASE%\config.toml" >nul
 if not exist "%BASE%\tasks.json" copy "%BASE%\tasks.json.example" "%BASE%\tasks.json" >nul
 
-REM ---------- 5. æ³¨å†Œè®¡åˆ’ä»»åŠ¡ ----------
-REM /SC ONLOGON  ç™»å½•åŽè§¦å‘
-REM /RL HIGHEST  æœ€é«˜æƒé™ï¼ˆBetterGI éœ€ç®¡ç†å‘˜ï¼‰
-REM /F           å¼ºåˆ¶è¦†ç›–å·²å­˜åœ¨çš„åŒåä»»åŠ¡
-echo [4/5] æ³¨å†Œè®¡åˆ’ä»»åŠ¡ "%TASKNAME%"ï¼ˆç™»å½•åŽè‡ªå¯ + æœ€é«˜æƒé™ï¼‰...
+REM ---------- 5. ×¢²á¼Æ»®ÈÎÎñ ----------
+REM /SC ONLOGON  µÇÂ¼ºó´¥·¢
+REM /RL HIGHEST  ×î¸ßÈ¨ÏÞ£¨BetterGI Ðè¹ÜÀíÔ±£©
+REM /F           Ç¿ÖÆ¸²¸ÇÒÑ´æÔÚµÄÍ¬ÃûÈÎÎñ
+echo [4/5] ×¢²á¼Æ»®ÈÎÎñ %TASKNAME%£¨µÇÂ¼ºó×ÔÆô + ×î¸ßÈ¨ÏÞ£©...
 schtasks /Create /SC ONLOGON /RL HIGHEST /TN "%TASKNAME%" /TR "\"%PYW%\" \"%SCRIPT%\"" /F
 if errorlevel 1 (
-  echo [é”™è¯¯] è®¡åˆ’ä»»åŠ¡æ³¨å†Œå¤±è´¥ã€‚
+  echo [´íÎó] ¼Æ»®ÈÎÎñ×¢²áÊ§°Ü¡£
   pause
   exit /b 1
 )
 
-REM ---------- 6. å®Œæˆ ----------
-echo [5/5] å®‰è£…å®Œæˆã€‚
+REM ---------- 6. Íê³É ----------
+echo [5/5] °²×°Íê³É¡£
 echo.
-echo ä¸‹ä¸€æ­¥ï¼š
-echo   1. ç¼–è¾‘ "%BASE%\config.toml"ï¼Œå¡«å†™ bettergi.exe_pathï¼ˆBetterGI.exe è·¯å¾„ï¼Œåæ–œæ åŒå†™ï¼‰
-echo   2. ç¼–è¾‘ "%BASE%\tasks.json"ï¼Œç¡®ä¿ groups ä¸Ž BetterGIã€Œå…¨è‡ªåŠ¨-è°ƒåº¦å™¨ã€ç»„åä¸€è‡´
-echo   3. é¦–æ¬¡å¯åŠ¨ä¼šå¼¹çª—æ˜¾ç¤º API å¯†é’¥ï¼ˆå¤åˆ¶åˆ° NAS åº”ç”¨ï¼‰ï¼š
+echo ÏÂÒ»²½£º
+echo   1. ±à¼­ "%BASE%\config.toml"£¬ÌîÐ´ bettergi.exe_path£¨BetterGI.exe Â·¾¶£¬·´Ð±¸ÜË«Ð´£©
+echo   2. ±à¼­ "%BASE%\tasks.json"£¬È·±£ groups Óë BetterGI¡¸È«×Ô¶¯-µ÷¶ÈÆ÷¡¹×éÃûÒ»ÖÂ
+echo   3. Ê×´ÎÆô¶¯»áµ¯´°ÏÔÊ¾ API ÃÜÔ¿£¨¸´ÖÆµ½ NAS Ó¦ÓÃ£©£º
 echo        "%PYW%" "%SCRIPT%"
-echo      é‡æ–°æŸ¥çœ‹å¯†é’¥ï¼š
-echo        "%PY%" "%SCRIPT%" --show-key
-echo   4. æ³¨é”€é‡æ–°ç™»å½•ï¼Œè®¡åˆ’ä»»åŠ¡è‡ªåŠ¨å¯åŠ¨ç›‘å¬å™¨
+echo   4. ×¢ÏúÖØÐÂµÇÂ¼£¬¼Æ»®ÈÎÎñ×Ô¶¯Æô¶¯¼àÌýÆ÷
 echo.
 pause

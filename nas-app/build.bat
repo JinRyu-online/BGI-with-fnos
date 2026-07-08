@@ -1,9 +1,9 @@
 @echo off
-REM æ‰“åŒ… nas-app ä¸º .fpkï¼ˆWindowsï¼‰ã€‚
-REM ç”¨æ³•ï¼š
-REM   build.bat                       REM ä½¿ç”¨ PATH ä¸­çš„ fnpack
+REM ´ò°ü nas-app Îª .fpk£¨Windows£©¡£
+REM ÓÃ·¨£º
+REM   build.bat                       REM Ê¹ÓÃ PATH ÖĞµÄ fnpack
 REM   set FNPACK=C:\path\fnpack.exe ^& build.bat
-REM ä¸‹è½½ fnpackï¼šhttps://developer.fnnas.com/docs/cli/fnpack/ ï¼ˆé€‰ windows-amd64ï¼Œæ”¹å fnpack.exeï¼‰
+REM ÏÂÔØ fnpack£ºhttps://developer.fnnas.com/docs/cli/fnpack/ £¨Ñ¡ windows-amd64£¬¸ÄÃû fnpack.exe£©
 setlocal
 cd /d "%~dp0"
 
@@ -11,19 +11,19 @@ if "%FNPACK%"=="" set FNPACK=fnpack
 
 where "%FNPACK%" >nul 2>&1
 if errorlevel 1 (
-  echo é”™è¯¯ï¼šæœªæ‰¾åˆ° fnpackã€‚è¯·ä¸‹è½½åæ”¾å…¥ PATHï¼Œæˆ– set FNPACK=è·¯å¾„ ^& build.bat
+  echo ´íÎó£ºÎ´ÕÒµ½ fnpack¡£ÇëÏÂÔØºó·ÅÈë PATH£¬»ò set FNPACK=Â·¾¶ ^& build.bat
   exit /b 1
 )
 
-echo ==^> åœ¨ %CD% æ‰§è¡Œ fnpack build ...
+echo ==^> ÔÚ %CD% Ö´ĞĞ fnpack build ...
 call "%FNPACK%" build
 if errorlevel 1 exit /b 1
 
 echo.
-echo ==^> å®Œæˆã€‚ç”Ÿæˆçš„ .fpk ä½äºå½“å‰ç›®å½•ã€‚
+echo ==^> Íê³É¡£Éú³ÉµÄ .fpk Î»ÓÚµ±Ç°Ä¿Â¼¡£
 dir /b bgi-trigger*.fpk 2>nul || dir /b *.fpk
 echo.
-echo å®‰è£…åˆ°é£ç‰› NASï¼š
-echo   appcenter-cli install-fpk ^<ä¸Šè¿° .fpk æ–‡ä»¶^>
-echo   æˆ–åœ¨é£ç‰›åº”ç”¨ä¸­å¿ƒåå°ä¸Šä¼ ã€‚
+echo °²×°µ½·ÉÅ£ NAS£º
+echo   appcenter-cli install-fpk ^<ÉÏÊö .fpk ÎÄ¼ş^>
+echo   »òÔÚ·ÉÅ£Ó¦ÓÃÖĞĞÄºóÌ¨ÉÏ´«¡£
 endlocal
