@@ -51,7 +51,9 @@ def _show_key_window(api_key: str) -> None:
         print(f"[BGI-Trigger] API key (no display): {api_key}", file=sys.stderr)
         return
     root.title("BetterGI Trigger — 密钥")
-    tk.Label(root, text="NAS 应用配对时粘贴此密钥：", padx=16, pady=(12, 4)).pack()
+    # 注意：tkinter 部分 版本不支持 padx/pady 传元组（会报 bad screen distance），
+    #       统一用标量值，垂直间距靠 pack(pady=...) 控制。
+    tk.Label(root, text="NAS 应用配对时粘贴此密钥：").pack(pady=12)
     entry = tk.Entry(root, width=48, font=("Consolas", 10))
     entry.insert(0, api_key)
     entry.config(state="readonly")
@@ -63,7 +65,7 @@ def _show_key_window(api_key: str) -> None:
         root.clipboard_append(api_key)
 
     tk.Button(root, text="复制密钥", command=_copy).pack(pady=4)
-    tk.Button(root, text="关闭并启动服务", command=root.destroy).pack(pady=(4, 12))
+    tk.Button(root, text="关闭并启动服务", command=root.destroy).pack(pady=12)
     root.mainloop()
 
 
