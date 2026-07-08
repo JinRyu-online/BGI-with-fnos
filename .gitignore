@@ -30,3 +30,6 @@ skills-lock.json
 .qoder/
 .trae/
 .windsurf/
+
+# Apifox CLI 本地配置（projectId 等）
+.apifox/
