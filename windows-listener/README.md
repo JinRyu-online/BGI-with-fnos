@@ -50,6 +50,53 @@ windows-listener/tasks/
 
 > 也可拆成每任务一个文件（如 `tasks/daily.json`、`tasks/abyss.json`），便于管理。`*.example` 后缀的文件不会被读取。
 
+### tasks.json 字段说明（带注释样例）
+
+> ⚠️ 实际 `tasks.json` 必须是**纯 JSON**（加载器不解析注释）。下面的 `//` 注释仅用于文档说明各字段含义，编辑时请去掉注释、保留 JSON 本身。
+
+```jsonc
+[
+  {
+    // 任务唯一标识。/trigger {"task_id":"daily"} 通过它引用此任务。同一目录内不可重复
+    "id": "daily",
+
+    // 在 NAS GUI / Apifox 上显示的名称。省略时默认取 id
+    "display_name": "日常一条龙",
+
+    // BetterGI 调度器组名列表，按顺序执行。必须与 BetterGI「全自动-调度器」里的组名逐字一致，
+    // 否则触发后 BetterGI 找不到组会失败。建议末尾放「关闭游戏」组，让游戏退出以触发完成判定 B
+    "groups": ["日常一条龙", "关闭游戏"],
+
+    // 本任务最大执行时长（分钟）。超时则标记 state=timeout 并尝试清理残留进程
+    "timeout_min": 90,
+
+    // 任务完成后的收尾动作。可选值：
+    //   sleep     休眠（默认，可被 WOL 唤醒；需 Windows 已 powercfg /hibernate on）
+    //   shutdown  关机
+    //   lock      锁屏（不关机，保留登录态）
+    //   none      不动作
+    "after_done": "sleep"
+  },
+  {
+    "id": "abyss",
+    "display_name": "深渊刷本",
+    "groups": ["深渊", "关闭游戏"],
+    "timeout_min": 60,
+    "after_done": "sleep"
+  }
+]
+```
+
+字段速查：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `id` | string | 是 | 任务唯一标识，`/trigger` 引用 |
+| `display_name` | string | 否 | 显示名称，缺省取 `id` |
+| `groups` | string[] | 是 | BetterGI 调度器组名，须与 BetterGI 一致 |
+| `timeout_min` | int | 否 | 最大执行时长（分钟），缺省 90 |
+| `after_done` | string | 否 | 收尾动作，缺省 `sleep` |
+
 ## 依赖与镜像（国内友好）
 
 `install.bat` 的依赖安装策略：
