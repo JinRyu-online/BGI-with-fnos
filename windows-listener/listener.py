@@ -35,9 +35,14 @@ VERSION = "1.0.0"
 # 所有运行时文件均位于本脚本所在目录。
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.toml"
-TASKS_PATH = BASE_DIR / "tasks.json"
 TRUSTED_PATH = BASE_DIR / "trusted.json"           # 已信任 IP 持久化
 FIRST_RUN_MARKER = BASE_DIR / ".first_run_done"    # 首次启动标记
+
+
+def _resolve_tasks_dir(config: ListenerConfig) -> Path:
+    """解析任务清单目录：相对路径相对于 BASE_DIR，绝对路径原样使用。"""
+    p = Path(config.tasks.dir)
+    return p if p.is_absolute() else BASE_DIR / p
 
 log = logging.getLogger("bgi_trigger")
 
@@ -78,7 +83,7 @@ def main() -> int:
 
     show_key = "--show-key" in sys.argv
     config = ListenerConfig.load(CONFIG_PATH)
-    tasks = TaskRegistry.load(TASKS_PATH)
+    tasks = TaskRegistry(_resolve_tasks_dir(config))
 
     auth = AuthState(
         api_key=config.auth.api_key,

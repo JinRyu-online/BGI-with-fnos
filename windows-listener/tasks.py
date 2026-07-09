@@ -1,18 +1,23 @@
-"""任务清单模块（唯一真相源）。
+"""任务清单模块（唯一真相源，支持目录热加载）。
 
-tasks.json 把「任务 id」映射到 BetterGI 调度器组名及每任务覆盖参数
-（超时、收尾动作）。监听器启动时加载并校验；NAS 端通过 /tasks 接口
-只读拉取，渲染成触发按钮。
+任务来源可以是单个文件（如 tasks.json），也可以是一个目录（如 tasks.d/）：
+- 目录模式：读取目录下所有 *.json，每个文件可以是单个任务对象或任务数组，合并。
+- 文件模式：读取该文件，单个对象或数组。
 
-BetterGI 命令行只能跑调度器组（--startGroups），无法直接指定单个
-JS 脚本，因此任务清单的核心字段是 groups（组名列表），组名必须与
-BetterGI「全自动-调度器」中配置的组名完全一致。
+热加载：每次访问 all()/get() 时，基于文件 mtime 签名判断是否有变动，变了才重读。
+因此修改任务文件后无需重启监听器，下一次 /tasks 请求即生效。
+
+BetterGI 命令行只能跑调度器组（--startGroups），无法直接指定单个 JS 脚本，
+因此任务的核心字段是 groups（组名列表），须与 BetterGI「全自动-调度器」组名一致。
 """
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+log = logging.getLogger("bgi_trigger.tasks")
 
 # 每任务的默认值（与 config.execution 默认值保持一致，
 # 使「无覆盖」的任务行为与全局默认相同）。
@@ -54,18 +59,65 @@ class Task:
 
 
 class TaskRegistry:
-    """任务清单：从 tasks.json 加载，按 id 查询。"""
+    """任务清单：从文件或目录加载，按 id 查询，支持 mtime 热加载。"""
 
-    def __init__(self, tasks: list[Task]) -> None:
-        self._by_id = {t.id: t for t in tasks}
+    def __init__(self, path: Path | str) -> None:
+        self._path = Path(path)
+        self._signature: tuple | None = None
+        self._by_id: dict[str, Task] = {}
+        self._reload()  # 首次构造立即加载
 
     @classmethod
     def load(cls, path: Path | str) -> "TaskRegistry":
-        """从磁盘加载 tasks.json 并逐条校验，任一校验失败抛 ValueError。"""
-        path = Path(path)
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        tasks = [cls._build(item) for item in raw]
-        return cls(tasks)
+        """向后兼容的类方法入口，等价于 TaskRegistry(path)。"""
+        return cls(path)
+
+    # ---- 热加载 ----
+
+    def _current_signature(self) -> tuple:
+        """当前来源的签名：目录=各 *.json 的 (文件名, mtime)；文件=(文件名, mtime)。
+
+        签名变化（内容改、增删文件）即触发重读。"""
+        if self._path.is_dir():
+            files = sorted(self._path.glob("*.json"))
+            return tuple((f.name, f.stat().st_mtime) for f in files)
+        if self._path.exists():
+            p = self._path
+            return ((p.name, p.stat().st_mtime),)
+        return ()
+
+    def _maybe_reload(self) -> None:
+        """签名变了才重读，否则用内存缓存。每次 all()/get() 调用。"""
+        sig = self._current_signature()
+        if sig != self._signature:
+            self._signature = sig
+            self._reload()
+
+    def _reload(self) -> None:
+        """重新加载全部任务。目录模式下单个文件解析失败则跳过（记日志），不整体失败。"""
+        by_id: dict[str, Task] = {}
+        for item in self._iter_raw_items():
+            try:
+                t = self._build(item)
+            except ValueError as e:
+                log.warning("跳过非法任务定义：%s", e)
+                continue
+            by_id[t.id] = t
+        self._by_id = by_id
+
+    def _iter_raw_items(self):
+        """枚举原始任务字典：目录=各 *.json 合并；文件=该文件。支持对象或数组。"""
+        if self._path.is_dir():
+            for f in sorted(self._path.glob("*.json")):
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as e:
+                    log.warning("跳过无法解析的任务文件 %s：%s", f, e)
+                    continue
+                yield from _normalize(data)
+        elif self._path.exists():
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            yield from _normalize(data)
 
     @staticmethod
     def _build(item: dict) -> Task:
@@ -87,12 +139,22 @@ class TaskRegistry:
         )
 
     def get(self, task_id: str) -> Task:
-        """按 id 查任务，找不到抛 TaskNotFound。"""
+        """按 id 查任务（先热加载检查），找不到抛 TaskNotFound。"""
+        self._maybe_reload()
         try:
             return self._by_id[task_id]
         except KeyError:
             raise TaskNotFound(task_id)
 
     def all(self) -> list[Task]:
-        """返回全部任务（供 /tasks 接口）。"""
+        """返回全部任务（先热加载检查，供 /tasks 接口）。"""
+        self._maybe_reload()
         return list(self._by_id.values())
+
+
+def _normalize(data):
+    """把单个对象或数组统一成迭代器。"""
+    if isinstance(data, list):
+        yield from data
+    else:
+        yield data

@@ -70,7 +70,8 @@ echo [2/5] 依赖安装完成。
 REM ---------- 4. 生成配置文件（从 .example） ----------
 echo [3/5] 生成配置文件...
 if not exist "%BASE%\config.toml" copy "%BASE%\config.toml.example" "%BASE%\config.toml" >nul
-if not exist "%BASE%\tasks.json" copy "%BASE%\tasks.json.example" "%BASE%\tasks.json" >nul
+if not exist "%BASE%\tasks" mkdir "%BASE%\tasks"
+if not exist "%BASE%\tasks\tasks.json" copy "%BASE%\tasks\tasks.json.example" "%BASE%\tasks\tasks.json" >nul
 
 REM ---------- 5. 注册计划任务 ----------
 REM /SC ONLOGON  登录后触发
@@ -89,7 +90,8 @@ echo [5/5] 安装完成。
 echo.
 echo 下一步：
 echo   1. 编辑 "%BASE%\config.toml"，填写 bettergi.exe_path（BetterGI.exe 路径，反斜杠双写）
-echo   2. 编辑 "%BASE%\tasks.json"，确保 groups 与 BetterGI「全自动-调度器」组名一致
+echo   2. 编辑 "%BASE%\tasks\tasks.json"，确保 groups 与 BetterGI「全自动-调度器」组名一致
+echo      （支持热加载：改完无需重启，下一次 /tasks 即生效）
 echo   3. 首次启动会弹窗显示 API 密钥（复制到 NAS 应用）：
 echo        "%PYW%" "%SCRIPT%"
 echo   4. 注销重新登录，计划任务自动启动监听器

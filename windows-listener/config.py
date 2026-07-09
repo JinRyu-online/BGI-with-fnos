@@ -35,6 +35,11 @@ DEFAULTS: dict = {
         "grace_seconds": 30,          # 完成判定命中后的反悔窗口（秒），期间可 /abort 阻止收尾
         "keep_history": 20,           # 内存中保留的最近任务历史条数
     },
+    "tasks": {
+        # 任务清单来源目录（相对路径相对于监听器目录）。该目录下所有 *.json 热加载。
+        
+        "dir": "tasks",
+    },
 }
 
 
@@ -72,12 +77,19 @@ class Execution:
 
 
 @dataclass
+class Tasks:
+    """任务清单来源配置。"""
+    dir: str
+
+
+@dataclass
 class ListenerConfig:
     """解析后的监听器配置对象。"""
     server: Server
     auth: Auth
     bettergi: BetterGI
     execution: Execution
+    tasks: Tasks
     _path: Path = field(default=None, repr=False)  # 配置文件路径，内部使用
 
     @classmethod
@@ -99,6 +111,7 @@ class ListenerConfig:
             auth=Auth(**merged["auth"]),
             bettergi=BetterGI(**merged["bettergi"]),
             execution=Execution(**merged["execution"]),
+            tasks=Tasks(**merged["tasks"]),
             _path=path,
         )
 

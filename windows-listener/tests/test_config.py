@@ -35,6 +35,8 @@ def test_load_applies_defaults_for_missing_fields(tmp_path):
     assert config.bettergi.game_processes == ["YuanShen.exe", "GenshinImpact.exe"]
     # api_key absent -> generated on first run (covered in detail by the next test)
     assert config.auth.api_key != ""
+    # tasks 配置默认值
+    assert config.tasks.dir == "tasks"
 
 
 def test_first_run_generates_and_persists_api_key(tmp_path):

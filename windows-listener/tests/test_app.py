@@ -1,18 +1,25 @@
+import json
+import tempfile
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app import create_app, AppDeps
 from auth import AuthState
 from state import JobStore
-from tasks import Task, TaskRegistry
+from tasks import TaskRegistry
 
 AUTH = {"Authorization": "Bearer secret"}
 
 
-def _registry():
-    return TaskRegistry([
-        Task(id="daily", display_name="日常一条龙",
-             groups=["日常一条龙", "关闭游戏"], timeout_min=90, after_done="sleep"),
-    ])
+def _registry() -> TaskRegistry:
+    # 写一个临时任务目录（新 API：TaskRegistry 接收路径，支持目录热加载）
+    d = Path(tempfile.mkdtemp())
+    (d / "daily.json").write_text(json.dumps({
+        "id": "daily", "display_name": "日常一条龙",
+        "groups": ["日常一条龙", "关闭游戏"], "timeout_min": 90, "after_done": "sleep",
+    }, ensure_ascii=False), encoding="utf-8")
+    return TaskRegistry(d)
 
 
 def _deps(launch=None, jobs=None):

@@ -41,3 +41,9 @@ default_after_done = "sleep"
 grace_seconds = 30
 # 内存中保留的最近任务历史条数（供 /status 与 NAS 展示）。
 keep_history = 20
+
+[tasks]
+# 任务清单来源目录。该目录下所有 *.json 会被读取并合并（每个文件可是单任务对象或数组）。
+# 相对路径相对于监听器目录；绝对路径原样使用。
+# 支持热加载：修改/增删目录内 .json 后，下一次 /tasks 请求即生效，无需重启。
+dir = "tasks"

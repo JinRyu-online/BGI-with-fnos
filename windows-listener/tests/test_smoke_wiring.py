@@ -16,7 +16,7 @@ def _setup(tmp_path):
     cfg = tmp_path / "config.toml"
     tasks = tmp_path / "tasks.json"
     shutil.copy(HERE / "config.toml.example", cfg)
-    shutil.copy(HERE / "tasks.json.example", tasks)
+    shutil.copy(HERE / "tasks" / "tasks.json.example", tasks)
     config = ListenerConfig.load(cfg)
     return config, TaskRegistry.load(tasks)
 

@@ -30,11 +30,25 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 1. 把整个 `windows-listener/` 目录拷到目标机（如 `D:\bgi_trigger\`）。
 2. 以管理员身份运行 `install.bat`：
    - 建 venv、装依赖；
-   - 从 `.example` 生成 `config.toml` / `tasks.json`；
+   - 从 `.example` 生成 `config.toml` 与 `tasks/tasks.json`；
    - 注册计划任务 `BGI-Trigger-Listener`（登录后自启 + 最高权限 + 失败重启）。
 3. 编辑 `config.toml`：填 `bettergi.exe_path`（BetterGI.exe 路径）；`log_path`/`log_done_keyword` 留空则完成判定只用 B+超时。
-4. 编辑 `tasks.json`：`groups` 须与 BetterGI「全自动-调度器」里的组名一致。
+4. 编辑 `tasks/tasks.json`：`groups` 须与 BetterGI「全自动-调度器」里的组名一致。
 5. 首次启动会弹窗显示 API 密钥（复制到 NAS 应用）；之后想再看：`venv\Scripts\pythonw.exe listener.py --show-key`。
+
+## 任务清单与热加载
+
+任务来源由 `config.toml` 的 `[tasks] dir` 指定（默认 `tasks` 目录）。该目录下所有 `*.json` 会被读取并合并，每个文件可以是单个任务对象或任务数组：
+
+```
+windows-listener/tasks/
+├── tasks.json          实际任务清单（install.bat 从 .example 生成）
+└── tasks.json.example
+```
+
+**热加载**：修改/增删目录内 `.json` 后，**下一次 `/tasks` 请求即生效，无需重启监听器**。基于文件 mtime 检测变化。非法任务定义会被跳过并记日志（不会让 `/tasks` 整个失败）。
+
+> 也可拆成每任务一个文件（如 `tasks/daily.json`、`tasks/abyss.json`），便于管理。`*.example` 后缀的文件不会被读取。
 
 ## 依赖与镜像（国内友好）
 

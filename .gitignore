@@ -7,7 +7,7 @@ __pycache__/
 # Windows listener 运行时生成文件（由 install.bat 从 .example 生成，勿提交）
 windows-listener/venv/
 windows-listener/config.toml
-windows-listener/tasks.json
+windows-listener/tasks/tasks.json
 windows-listener/trusted.json
 windows-listener/.first_run_done
 windows-listener/var/
