@@ -142,14 +142,16 @@ def _default_config_path() -> str:
 def _default_scanner(subnet: str | None, port: int, *, progress_cb: Callable[[str, list[dict]], None] | None = None) -> list[dict]:
     """按子网粒度扫描，每完成一个子网调 progress_cb(subnet, found_devices)。
 
-    流程：
-      1. 用户显式指定的 subnet（仅此一个，无 fallback）
-      2. 宿主机网卡自动发现的本地子网
-      3. COMMON_SUBNETS 作为兜底（本地子网为空或无设备时触发）
+    优化策略（解决容器内扫描慢的问题）：
+      - 跳过本地超大子网（prefix < 24，如 docker 网桥 172.17.0.0/16 = 65534 IP）
+      - 优先扫 COMMON_SUBNETS（家用常见网段，命中概率最高）
+      - 发现任一设备后立即停止，不再扫剩余网段
+      - 仅当 COMMON 全未命中时，补扫本地的 /24 子网
 
     进度通过 progress_cb 逐子网回调，由 api_scan 接入 _progress_mark_subnet。
     单独测试/使用时 progress_cb=None 即回退到静默模式。
     """
+    import ipaddress
     from discovery import _safe_net_if_addrs
     _seen: dict[str, dict] = {}
 
@@ -158,28 +160,48 @@ def _default_scanner(subnet: str | None, port: int, *, progress_cb: Callable[[st
         devs = scan_subnet_parallel(cidr, port, default_probe, default_http_get, max_workers=128)
         for d in devs:
             _seen[d["ip"]] = d
+        if devs:
+            log.info("scan hit %s -> %s", cidr, [d["ip"] for d in devs])
         return devs
 
-    def _plan_and_scan(cidrs: list[str]) -> None:
+    def _plan_and_scan(cidrs: list[str]) -> bool:
+        """扫描列表，遇到首个命中即返回 True（用于 early exit）。"""
         for c in cidrs:
             found = _scan_one(c)
             if progress_cb:
                 progress_cb(c, found)
+            if _seen:
+                return True
+        return False
 
-    # 1. 用户指定的子网
+    # 1. 用户指定的子网（唯一，无 fallback）
     if subnet:
+        log.info("scan: explicit subnet %s", subnet)
         _plan_and_scan([subnet])
         return list(_seen.values())
 
-    # 2. 本地子网
-    local = list_local_subnets(_safe_net_if_addrs())
-    if local:
-        _plan_and_scan(local)
+    # 收集本地 /24（丢弃 >/24 的大网段如 docker 网桥 /16, 避免扫几十万 IP）
+    local_small = []
+    for s in list_local_subnets(_safe_net_if_addrs()):
+        try:
+            net = ipaddress.ip_network(s, strict=False)
+            if net.prefixlen >= 24:          # 仅保留 /24 或更小（点对点 /30, /31, /32）
+                local_small.append(s)
+            else:
+                log.info("scan: skip large local subnet %s (%d hosts)", s, net.num_addresses)
+        except ValueError:
+            pass
 
-    # 3. fallback: 空本地子网 或 本地子网全没命中
-    if not local or not _seen:
-        fallback = [c for c in COMMON_SUBNETS if c not in local]
-        _plan_and_scan(fallback)
+    # 2. 优先扫 COMMON（家用/办公网段最有可能命中, 每条 ≤ 254 IP）
+    log.info("scan: plan COMMON(%d ranges) first, local /24(%d) as fallback",
+             len(COMMON_SUBNETS), len(local_small))
+    if _plan_and_scan(COMMON_SUBNETS):
+        return list(_seen.values())
+
+    # 3. COMMON 全没命中 → 补扫本地 /24 子网
+    if local_small:
+        if _plan_and_scan(local_small):
+            return list(_seen.values())
 
     return list(_seen.values())
 

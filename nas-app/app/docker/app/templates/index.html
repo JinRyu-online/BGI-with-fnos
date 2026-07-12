@@ -84,6 +84,14 @@
     .alert.warn { background:#fffbeb; color:#92400e; border:1px solid #fef3c7; }
     .alert.err { background:#fef2f2; color:#991b1b; border:1px solid #fee2e2; }
     .alert.ok { background:#ecfdf5; color:#065f46; border:1px solid #d1fae5; }
+
+    /* 任务分组链 / 任务属性 */
+    .groups { display:flex; flex-wrap:wrap; gap:.25rem; align-items:center; margin:.35rem 0 .2rem; }
+    .g-step { font-size:.72rem; padding:.15rem .45rem; border-radius:6px; background:#eef0f3; color:#374151; }
+    .g-step.last { background:#dbeafe; color:#1e40af; font-weight:600; }
+    .g-arrow { color:#9ca3af; font-size:.7rem; }
+    .task-props { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; margin-top:.2rem; }
+    .task-props .prop { font-size:.72rem; color:#6b7280; }
   </style>
 </head>
 <body>
@@ -341,18 +349,26 @@ $('btn-unpair').onclick = async () => {
   $('tasks').innerHTML = '<p class="empty">尚未配对</p>';
 };
 
-// 任务列表
+// 任务列表（分区字段展示 · 分组链 · 计时 · 收尾动作）
 async function loadTasks() {
   try {
     const tasks = await api('GET', '/api/tasks');
     $('task-count').textContent = tasks.length;
     if (!tasks.length) { $('tasks').innerHTML = '<p class="empty">无任务</p>'; return; }
-    $('tasks').innerHTML = tasks.map(t =>
-      `<div class="task-row">
-         <div class="meta"><div class="name">${t.display_name}</div>
-           <div class="sub">${t.groups.join(' → ')} · ${t.timeout_min}min · 完成=${t.after_done}</div></div>
-         <button class="primary btn tiny" data-id="${t.id}" title="触发">▶ 执行</button>
-       </div>`).join('');
+    const afterLabel = { sleep: '💤 休眠', shutdown: '⏻ 关机', lock: '🔒 锁屏', none: '– 无' };
+    $('tasks').innerHTML = tasks.map(t => `
+      <div class="task-row">
+        <div class="meta">
+          <div class="name">${t.display_name}</div>
+          <div class="groups">${t.groups.map((g,i)=>`<span class="g-step${i===t.groups.length-1?' last':''}">${g}</span>`).join('<span class="g-arrow">→</span>')}</div>
+          <div class="task-props">
+            <span class="prop">⏱ ${t.timeout_min}分钟</span>
+            <span class="prop">🏁 ${afterLabel[t.after_done] || t.after_done}</span>
+            <span class="prop tag idle">${t.id}</span>
+          </div>
+        </div>
+        <button class="primary btn tiny" data-id="${t.id}" title="触发任务">▶ 执行</button>
+      </div>`).join('');
     document.querySelectorAll('#tasks .task-row button').forEach(b =>
       b.onclick = () => trigger(b.dataset.id));
   } catch (e) { $('tasks').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; $('task-count').textContent = '!'; }
@@ -384,16 +400,21 @@ function pollStatus(jobId) {
   }, 10000);
 }
 
-// 历史
+// 历史（可读格式 · 状态中文 · 字段标签）
 async function loadJobs() {
   try {
     const jobs = await api('GET', '/api/jobs');
     if (!jobs.length) { $('jobs').innerHTML = '<p class="empty">暂无历史</p>'; return; }
-    $('jobs').innerHTML = jobs.map(j =>
-      `<div class="job-row">
-         <span class="tag ${j.state}">${j.state}</span>
-         <span class="sub">task=${j.task_id} · job=${j.job_id}</span>
-       </div>`).join('');
+    const stateLabel = { running: '运行中', completing: '收尾中', done: '✅ 已完成',
+                         timeout: '⏰ 超时', failed: '❌ 失败', aborted: '🚫 已中止' };
+    $('jobs').innerHTML = jobs.map(j => `
+      <div class="job-row">
+        <span class="tag ${j.state}">${stateLabel[j.state] || j.state}</span>
+        <div class="meta">
+          <div class="sub"><b>任务名称</b> ${j.task_id}</div>
+          <div class="sub"><b>任务ID</b> <code>${j.job_id}</code></div>
+        </div>
+      </div>`).join('');
   } catch (e) { $('jobs').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; }
 }
 $('btn-load-jobs').onclick = loadJobs;
