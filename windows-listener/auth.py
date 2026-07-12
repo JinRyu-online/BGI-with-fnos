@@ -35,6 +35,11 @@ class AuthState:
         """已信任 IP 列表（拷贝，外部修改不影响内部状态）。"""
         return list(self._trusted)
 
+    @property
+    def api_key(self) -> str:
+        """配对密钥（供 /key 接口暴露给可信内网 NAS）。"""
+        return self._api_key
+
     def verify(self, token: str, client_ip: str) -> None:
         """校验请求：密钥必须正确；来源 IP 若已信任则放行，否则首次自动学习。
 

@@ -35,6 +35,13 @@ components:
         hostname: { type: string, example: DESKTOP-WIN }
         version: { type: string, example: 1.0.0 }
       required: [service, hostname, version]
+    PairingInfo:
+      type: object
+      description: 配对信息（密钥 + 主机名），供 NAS 自动填充配对表单。
+      properties:
+        api_key: { type: string, example: "8c38afc257d60668177baad82f7bd351" }
+        hostname: { type: string, example: DESKTOP-WIN }
+      required: [api_key, hostname]
     Task:
       type: object
       description: 可触发任务（对应 BetterGI 调度器组）。
@@ -104,6 +111,23 @@ paths:
               examples:
                 ok:
                   value: { service: bgi-trigger, hostname: DESKTOP-WIN, version: 1.0.0 }
+  /key:
+    get:
+      tags: [配对]
+      summary: 获取配对密钥
+      description: |
+        免鉴权。返回本监听器的 api_key 与 hostname，供 NAS 应用自动填充配对表单。
+        MVP 内网可信场景使用；对外暴露请上 HTTPS + 鉴权。
+      security: []
+      responses:
+        '200':
+          description: 配对密钥
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PairingInfo' }
+              examples:
+                ok:
+                  value: { api_key: "8c38afc257d60668177baad82f7bd351", hostname: "DESKTOP-WIN" }
   /tasks:
     get:
       tags: [任务]

@@ -43,6 +43,15 @@ def test_health_no_auth_returns_signature():
     assert body["version"] == "1.0.0"
 
 
+def test_key_no_auth_returns_api_key_and_hostname():
+    client = TestClient(create_app(_deps()))
+    r = client.get("/key")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["api_key"] == "secret"
+    assert body["hostname"] == "DESKTOP-TEST"
+
+
 def test_tasks_without_auth_rejected():
     client = TestClient(create_app(_deps()))
     r = client.get("/tasks")

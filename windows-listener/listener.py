@@ -4,6 +4,14 @@
   pythonw.exe listener.py            正常启动（由计划任务调用）
   python listener.py --show-key      重新弹出密钥窗口
 
+提供六个 HTTP 接口：
+  GET  /health   免鉴权，返回服务身份签名
+  GET  /key      免鉴权，返回 {api_key, hostname}（供 NAS 自动配对）
+  GET  /tasks    鉴权，返回任务清单
+  POST /trigger  鉴权，启动任务
+  GET  /status   鉴权，查询任务状态
+  POST /abort    鉴权，中止当前任务
+
 启动流程：
   1. 加载 config.toml（首启自动生成密钥）与 tasks.json；
   2. 装配鉴权、任务存储、启动器、应用依赖；

@@ -11,14 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import psutil
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from discovery import (default_http_get, default_probe, list_local_subnets,
-                       scan_subnet_parallel)
+from discovery import auto_discover_and_scan  # 替代 psutil+scan_subnet 串接
 from history import HistoryStore, default_history_path
 from listener_client import ListenerAuthError, ListenerClient, ListenerError
 from settings import Settings
@@ -57,12 +55,15 @@ def _default_config_path() -> str:
 
 
 def _default_scanner(subnet: str | None, port: int) -> list[dict]:
-    """默认扫描器：枚举本机子网，对每个 IP 并行探活 + 请求 /health 识别。"""
-    subnets = [subnet] if subnet else list_local_subnets(psutil.net_if_addrs())
-    devices: list[dict] = []
-    for sn in subnets:
-        devices.extend(scan_subnet_parallel(sn, port, default_probe, default_http_get))
-    return devices
+    """默认扫描器：自动发现子网 + scan；无果则回退扫描常见家用/办公子网。
+
+    流程见 discovery.auto_discover_and_scan：
+      1. 用户显式指定的 subnet（如有）
+      2. 宿主机网卡自动发现的本地子网
+      3. COMMON_SUBNETS 列表（家用/办公常见网段）作为兜底
+    """
+    return auto_discover_and_scan(port=port, subnet=subnet,
+                                  max_workers=128, common_fallback=True)
 
 
 def _default_client_factory(url: str, api_key: str) -> ListenerClient:

@@ -35,6 +35,11 @@ class AppDeps:
     jobs: JobStore
     launch: Callable[[Job, Task], None]  # 启动回调：非阻塞，实际工作在守护线程
 
+    @property
+    def api_key(self) -> str:
+        """配对密钥（供 /key 接口暴露）。见 auth.api_key。"""
+        return self.auth.api_key
+
 
 class TriggerBody(BaseModel):
     """POST /trigger 请求体。"""
@@ -63,6 +68,14 @@ def create_app(deps: AppDeps) -> FastAPI:
     def health() -> dict:
         """免鉴权健康检查 + 身份签名。"""
         return {"service": SERVICE_NAME, "hostname": deps.hostname, "version": deps.version}
+
+    @app.get("/key")
+    def key() -> dict:
+        """免鉴权返回配对密钥（api_key）。
+
+        MVP / 内网可信场景下由 NAS 应用拉取后填充配对表单，避免用户手敲密钥。
+        """
+        return {"api_key": deps.api_key, "hostname": deps.hostname}
 
     @app.get("/tasks")
     def list_tasks(request: Request, authorization: str | None = Header(default=None)) -> list[dict]:

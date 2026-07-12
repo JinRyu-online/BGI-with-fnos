@@ -6,62 +6,150 @@
   <title>BetterGI Trigger — NAS 应用</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
-    .muted { color: var(--pico-muted-color); }
-    .device-row { display:flex; gap:.5rem; align-items:center; margin:.25rem 0; }
-    .tag { font-size:.8rem; padding:.1rem .4rem; border-radius:.3rem; background:var(--pico-secondary-background); }
-    .ok { color: #2a9d8f; } .err { color: #e76f51; }
+    :root {
+      --brand: #5b8def;
+      --brand-d: #3a6fd8;
+      --green: #2a9d8f;
+      --red: #e76f51;
+      --amber: #e9c46a;
+    }
+    /* ---------- 全局 ---------- */
+    main { max-width: 860px; padding-top: 1.5rem; }
+    h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+    .subtitle { color: var(--pico-muted-color); margin-top: 0; }
+
+    /* ---------- 卡片 ---------- */
+    .card {
+      background: var(--pico-card-background-color, #fff);
+      border: 1px solid var(--pico-card-border-color, #e5e7eb);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin: 1rem 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .card h2 {
+      font-size: 1.05rem;
+      margin: 0 0 .75rem;
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .card h2 .badge {
+      font-size: .7rem; font-weight: 500;
+      padding: .15rem .55rem; border-radius: 999px;
+      background: var(--pico-secondary-background);
+    }
+
+    /* ---------- 按钮 ---------- */
+    .btn { display:inline-flex; align-items:center; gap:.35rem; }
+    .btn-row { display:flex; gap:.5rem; flex-wrap: wrap; align-items:center; }
+    button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+    button.primary:hover { background: var(--brand-d); border-color: var(--brand-d); }
+    button.tiny { padding: .3rem .65rem; font-size: .8rem; }
+
+    /* ---------- 设备 / 任务 条目 ---------- */
+    .device-row, .task-row, .job-row {
+      display: flex; gap: .6rem; align-items: center; justify-content: space-between;
+      padding: .55rem .85rem; margin: .35rem 0;
+      border: 1px solid #eef0f3; border-radius: 8px;
+      background: #fafbfc;
+      transition: background .15s;
+    }
+    .device-row:hover { background: #f3f6ff; border-color: #d4deff; }
+    .device-row .meta, .task-row .meta { flex: 1; }
+    .device-row .name { font-weight: 600; }
+    .device-row .sub { color: var(--pico-muted-color); font-size: .8rem; }
+
+    /* ---------- 状态标签 ---------- */
+    .tag {
+      font-size:.75rem; font-weight:600;
+      padding:.2rem .55rem; border-radius:999px;
+      white-space: nowrap;
+    }
+    .tag.idle { background:#eef0f3; color:#6b7280; }
+    .tag.running { background:#fff3cd; color:#92760b; }
+    .tag.completing { background:#d1fae5; color:#065f46; }
+    .tag.done { background:#d1fae5; color:#065f46; }
+    .tag.timeout { background:#fef3c7; color:#92400e; }
+    .tag.failed, .tag.aborted { background:#fee2e2; color:#991b1b; }
+    .tag.ok { background:#d1fae5; color:#065f46; }
+    .tag.err { background:#fee2e2; color:#991b1b; }
+    .tag.paired { background:#dbeafe; color:#1e40af; }
+
+    /* ---------- 提示 ---------- */
+    .hint { font-size: .85rem; color: var(--pico-muted-color); }
+    .empty { text-align:center; color: var(--pico-muted-color); padding: 1.5rem 0; }
+
+    /* ---------- 卡片内提示区 ---------- */
+    .alert { padding: .65rem .85rem; border-radius: 8px; font-size: .85rem; margin: .5rem 0; }
+    .alert.info { background:#eff6ff; color:#1e40af; border:1px solid #dbeafe; }
+    .alert.warn { background:#fffbeb; color:#92400e; border:1px solid #fef3c7; }
+    .alert.err { background:#fef2f2; color:#991b1b; border:1px solid #fee2e2; }
+    .alert.ok { background:#ecfdf5; color:#065f46; border:1px solid #d1fae5; }
   </style>
 </head>
 <body>
 <main class="container">
-  <h1>🎮 BetterGI Trigger</h1>
+  <header style="margin-bottom: 1rem;">
+    <h1>🎮 BetterGI Trigger</h1>
+    <p class="subtitle">通过飞牛 NAS 远程触发 Windows 端 BetterGI 执行自动化任务</p>
+  </header>
 
-  <!-- 当前目标 / 配对 -->
-  <section>
-    <h2>当前目标</h2>
-    <p id="target-info" class="muted">加载中…</p>
-    <button id="btn-unpair" class="outline secondary" hidden>取消配对</button>
+  <!-- ===== 当前目标卡 ===== -->
+  <section class="card">
+    <h2>📡 当前目标 <span id="target-badge" class="badge">未配对</span></h2>
+    <p id="target-info">加载中…</p>
+    <div class="btn-row">
+      <button id="btn-unpair" class="outline secondary" hidden>取消配对</button>
+    </div>
   </section>
 
-  <!-- 设备扫描 -->
-  <section>
-    <h2>扫描设备</h2>
-    <p class="muted">扫描局域网内的 BetterGI 监听器（首次使用点这里）。</p>
-    <button id="btn-scan">🔍 扫描局域网</button>
-    <div class="device-row" style="margin-top:.75rem;">
-      <input id="scan-subnet" type="text" placeholder="手动指定子网 CIDR，留空则自动探测">
-      <button id="btn-scan-subnet" class="outline tiny">按子网扫描</button>
+  <!-- ===== 扫描卡 ===== -->
+  <section class="card">
+    <h2>🔍 扫描设备</h2>
+    <p class="hint">扫描局域网内的 BetterGI 监听器（首次使用点这里）。自动扫描常见网段，无需手动指定。</p>
+    <div class="btn-row">
+      <button id="btn-scan" class="primary btn">🔍 自动扫描</button>
     </div>
-    <p id="scan-empty-hint" class="muted" hidden>
-      未发现监听器？请确认 Windows 监听器已启动、并<strong>手动输入子网 CIDR</strong>（如 <code>192.168.31.0/24</code>）重试。
+    <details style="margin-top:.75rem;">
+      <summary class="hint" style="cursor:pointer;">高级：手动指定子网</summary>
+      <div class="btn-row" style="margin-top:.5rem;">
+        <input id="scan-subnet" type="text" placeholder="如 192.168.31.0/24，留空用自动扫描">
+        <button id="btn-scan-subnet" class="outline btn tiny">按子网扫描</button>
+      </div>
+    </details>
+    <p id="scan-empty-hint" class="alert warn" hidden>
+      未发现监听器？请确认 Windows 监听器已启动、并在上方手动指定子网 CIDR（如 <code>192.168.31.0/24</code>）重试。
     </p>
     <div id="scan-result"></div>
-    <div id="pair-form" hidden>
-      <label>密钥
-        <input id="pair-key" type="text" placeholder="粘贴 Windows 监听器显示的密钥">
-      </label>
-      <button id="btn-pair">配对并测试连接</button>
+    <div id="pair-form" hidden style="margin-top:.75rem;">
+      <p id="pair-info" class="alert info"></p>
+      <div class="btn-row">
+        <button id="btn-pair" class="primary btn">确认配对</button>
+      </div>
     </div>
   </section>
 
-  <!-- 任务 -->
-  <section>
-    <h2>任务</h2>
-    <button id="btn-load-tasks" class="outline">刷新任务列表</button>
-    <div id="tasks"></div>
+  <!-- ===== 任务卡 ===== -->
+  <section class="card">
+    <h2>⚡ 任务 <span id="task-count" class="badge">0</span></h2>
+    <div class="btn-row" style="margin-bottom:.5rem;">
+      <button id="btn-load-tasks" class="outline btn tiny">刷新</button>
+    </div>
+    <div id="tasks"><p class="empty">尚未配对或无任务</p></div>
   </section>
 
-  <!-- 运行状态 -->
-  <section>
-    <h2>运行状态</h2>
-    <p id="run-status" class="muted">空闲</p>
+  <!-- ===== 运行状态卡 ===== -->
+  <section class="card">
+    <h2>📊 运行状态</h2>
+    <p id="run-status" class="tag idle">空闲</p>
   </section>
 
-  <!-- 历史 -->
-  <section>
-    <h2>运行历史</h2>
-    <button id="btn-load-jobs" class="outline">刷新历史</button>
-    <ul id="jobs"></ul>
+  <!-- ===== 历史卡 ===== -->
+  <section class="card">
+    <h2>📜 运行历史</h2>
+    <div class="btn-row" style="margin-bottom:.5rem;">
+      <button id="btn-load-jobs" class="outline btn tiny">刷新</button>
+    </div>
+    <div id="jobs"><p class="empty">暂无历史</p></div>
   </section>
 </main>
 
@@ -83,45 +171,78 @@ async function refreshTarget() {
     const cfg = await api('GET', '/api/config');
     const t = cfg.default_target;
     if (t) {
-      $('target-info').innerHTML = `已配对：<strong>${t.hostname || t.ip}</strong>（${t.ip}:${t.port}）`;
+      $('target-info').innerHTML = `<span class="name">${t.hostname || t.ip}</span><br><span class="sub">${t.ip}:${t.port}</span>`;
+      $('target-badge').textContent = '已配对';
+      $('target-badge').className = 'tag paired';
       $('btn-unpair').hidden = false;
     } else {
-      $('target-info').textContent = '未配对设备，请先扫描。';
+      $('target-info').innerHTML = '<p class="empty">尚未配对，请先“扫描设备”</p>';
+      $('target-badge').textContent = '未配对';
+      $('target-badge').className = 'tag idle';
       $('btn-unpair').hidden = true;
     }
-  } catch (e) { $('target-info').textContent = '读取配置失败：' + e.message; }
+  } catch (e) { $('target-info').innerHTML = `<p class="alert err">读取配置失败：${e.message}</p>`; }
 }
 
-// 扫描（带可选 subnet 覆盖）
+// 扫描（带可选 subnet 覆盖 + 自动 fallback 到常见子网）
 async function runScan() {
   $('scan-empty-hint').hidden = true;
   const subnet = $('scan-subnet').value.trim();
-  $('scan-result').innerHTML = '<p class="muted">扫描中…（约 10-30 秒）</p>';
+  $('scan-result').innerHTML = '<p class="alert info">扫描中…（可能 10-30 秒，fallback 阶段会稍慢）</p>';
   try {
     const { devices } = await api('POST', '/api/scan', subnet ? { subnet } : undefined);
     if (!devices.length) {
-      $('scan-result').innerHTML = '<p class="err">未发现 BetterGI 监听器。</p>';
-      $('scan-empty-hint').hidden = false;  // 空结果时提示手动输入子网
+      $('scan-result').innerHTML = '';
+      $('scan-empty-hint').hidden = false;
       return;
     }
     $('scan-result').innerHTML = devices.map(d =>
       `<div class="device-row">
-         <span>${d.hostname || '(未知主机)'} — ${d.ip}:${d.port}</span>
-         <button class="outline tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
+         <div class="meta">
+           <div class="name">${d.hostname || '(未知主机)'}</div>
+           <div class="sub">${d.ip}:${d.port} ${d.version ? '· v' + d.version : ''}</div>
+         </div>
+         <button class="outline btn tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
        </div>`).join('');
-    document.querySelectorAll('.device-row button').forEach(b =>
-      b.onclick = () => { selected = b.dataset; $('pair-form').hidden = false; });
-  } catch (e) { $('scan-result').innerHTML = '<p class="err">扫描失败：' + e.message + '</p>'; }
+    document.querySelectorAll('#scan-result .device-row button').forEach(b =>
+      b.onclick = () => selectDevice(b.dataset));
+  } catch (e) { $('scan-result').innerHTML = `<p class="alert err">扫描失败：${e.message}</p>`; }
 }
 $('btn-scan').onclick = runScan;
 $('btn-scan-subnet').onclick = runScan;
 let selected = null;
 
-// 配对
+// 选择设备：自动拉取 /key 填充配对表单（无需手敲密钥）
+async function selectDevice(dev) {
+  selected = dev;
+  $('pair-form').hidden = false;
+  $('pair-info').className = 'alert info';
+  $('pair-info').innerHTML = '🔄 正在获取配对信息…';
+  $('btn-pair').disabled = true;
+  try {
+    const r = await fetch(`http://${dev.ip}:${dev.port}/key`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.api_key) {
+      $('pair-info').className = 'alert err';
+      $('pair-info').innerHTML = `❌ 无法获取密钥：${data.detail || r.status}`;
+      return;
+    }
+    selected.api_key = data.api_key;
+    selected.host = data.hostname || dev.host || '';
+    $('pair-info').className = 'alert ok';
+    $('pair-info').innerHTML = `✅ 已就绪：<strong>${selected.host}</strong> @ ${dev.ip}:${dev.port}`;
+    $('btn-pair').disabled = false;
+  } catch (e) {
+    $('pair-info').className = 'alert err';
+    $('pair-info').innerHTML = `❌ 无法连接设备：${e.message}`;
+  }
+}
+
+// 配对（使用自动填充的 api_key，无需用户手输）
 $('btn-pair').onclick = async () => {
   if (!selected) return;
   try {
-    await api('POST', '/api/pair', { ip: selected.ip, port: +selected.port, hostname: selected.host, api_key: $('pair-key').value });
+    await api('POST', '/api/pair', { ip: selected.ip, port: +selected.port, hostname: selected.host, api_key: selected.api_key });
     $('pair-form').hidden = true;
     await refreshTarget();
     await loadTasks();
@@ -132,18 +253,25 @@ $('btn-pair').onclick = async () => {
 $('btn-unpair').onclick = async () => {
   await api('POST', '/api/unpair');
   await refreshTarget();
-  $('tasks').innerHTML = '';
+  $('task-count').textContent = '0';
+  $('tasks').innerHTML = '<p class="empty">尚未配对</p>';
 };
 
 // 任务列表
 async function loadTasks() {
   try {
     const tasks = await api('GET', '/api/tasks');
+    $('task-count').textContent = tasks.length;
+    if (!tasks.length) { $('tasks').innerHTML = '<p class="empty">无任务</p>'; return; }
     $('tasks').innerHTML = tasks.map(t =>
-      `<button data-id="${t.id}">▶ ${t.display_name}</button>`).join(' ') || '<p class="muted">无任务</p>';
-    document.querySelectorAll('#tasks button').forEach(b =>
+      `<div class="task-row">
+         <div class="meta"><div class="name">${t.display_name}</div>
+           <div class="sub">${t.groups.join(' → ')} · ${t.timeout_min}min · 完成=${t.after_done}</div></div>
+         <button class="primary btn tiny" data-id="${t.id}" title="触发">▶ 执行</button>
+       </div>`).join('');
+    document.querySelectorAll('#tasks .task-row button').forEach(b =>
       b.onclick = () => trigger(b.dataset.id));
-  } catch (e) { $('tasks').innerHTML = '<p class="err">加载失败：' + e.message + '</p>'; }
+  } catch (e) { $('tasks').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; $('task-count').textContent = '!'; }
 }
 $('btn-load-tasks').onclick = loadTasks;
 
@@ -152,9 +280,13 @@ let pollTimer = null;
 async function trigger(taskId) {
   try {
     const { job_id } = await api('POST', '/api/trigger', { task_id: taskId });
-    $('run-status').textContent = `任务已触发，job=${job_id}，运行中…`;
+    setRunStatus('running', `任务已触发 · job=${job_id}`);
     pollStatus(job_id);
-  } catch (e) { $('run-status').innerHTML = `<span class="err">触发失败：${e.message}</span>`; }
+  } catch (e) { setRunStatus('failed', `触发失败：${e.message}`); }
+}
+function setRunStatus(kind, text) {
+  $('run-status').className = 'tag ' + kind;
+  $('run-status').innerHTML = text;
 }
 function pollStatus(jobId) {
   clearInterval(pollTimer);
@@ -162,7 +294,7 @@ function pollStatus(jobId) {
     try {
       const st = await api('GET', '/api/status?job_id=' + jobId);
       const terminal = ['done','timeout','failed','aborted'].includes(st.state);
-      $('run-status').innerHTML = `job=${jobId} 状态：<strong>${st.state}</strong>`;
+      setRunStatus(st.state, `job=${jobId} · ${st.state}${st.completion_reason ? ' · ' + st.completion_reason : ''}`);
       if (terminal) { clearInterval(pollTimer); loadJobs(); }
     } catch (e) { /* 暂时错误，继续轮询 */ }
   }, 10000);
@@ -172,14 +304,19 @@ function pollStatus(jobId) {
 async function loadJobs() {
   try {
     const jobs = await api('GET', '/api/jobs');
+    if (!jobs.length) { $('jobs').innerHTML = '<p class="empty">暂无历史</p>'; return; }
     $('jobs').innerHTML = jobs.map(j =>
-      `<li><span class="tag">${j.state}</span> job=${j.job_id} task=${j.task_id}</li>`).join('') || '<li class="muted">无</li>';
-  } catch (e) { $('jobs').innerHTML = '<li class="err">加载失败</li>'; }
+      `<div class="job-row">
+         <span class="tag ${j.state}">${j.state}</span>
+         <span class="sub">task=${j.task_id} · job=${j.job_id}</span>
+       </div>`).join('');
+  } catch (e) { $('jobs').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; }
 }
 $('btn-load-jobs').onclick = loadJobs;
 
 // 初始化
-refreshTarget().then(() => { /* 若已配对，自动加载任务 */ if ($('btn-unpair').hidden === false) loadTasks(); });
+setRunStatus('idle', '空闲');
+refreshTarget().then(() => { if ($('btn-unpair').hidden === false) loadTasks(); });
 loadJobs();
 </script>
 </body>

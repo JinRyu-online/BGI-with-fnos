@@ -126,6 +126,84 @@ def scan_subnet_parallel(
     return out
 
 
+def auto_discover_and_scan(
+    port: int = 8765,
+    subnet: str | None = None,
+    common_fallback: bool = True,
+    addrs: dict | None = None,
+    probe: Callable[[str, int], bool] | None = None,
+    http_get: Callable[[str, int], dict | None] | None = None,
+    max_workers: int = 128,
+) -> list[dict]:
+    """自动发现子网 + 扫描；若仍无设备，回退扫描常见子网。
+
+    扫描顺序：
+      1. 用户通过 subnet 显式指定的子网（仅此一个）
+      2. 宿主机网卡自动发现的所有本地子网
+      3. （可选）COMMON_SUBNETS 列表 —— 覆盖绝大多数家用/办公网络
+
+    返回所有环节发现的设备，按去重 IP 合并。
+    """
+    _probe = probe or default_probe
+    _http = http_get or default_http_get
+    seen: dict[str, dict] = {}   # ip -> device dict，自然去重
+
+    def _collect(cidr: str) -> None:
+        for d in scan_subnet_parallel(cidr, port, _probe, _http, max_workers):
+            seen[d["ip"]] = d
+
+    # 1. 用户指定的子网
+    if subnet:
+        _collect(subnet)
+        return list(seen.values())   # 显式子网：扫完即返回，不做 fallback
+
+    # 2. 宿主机网卡自动发现的子网。容器（尤其是 host 网络无效时）网段可能无法
+    #    直接反映 Windows 所在网段，所以这一步经常为空，需要 fallback。
+    local_subnets = list_local_subnets(addrs or _safe_net_if_addrs())
+    for s in local_subnets:
+        _collect(s)
+
+    # 3. fallback：auto 发现未命中任何设备 → 扫常见子网
+    if common_fallback and not seen:
+        for cidr in COMMON_SUBNETS:
+            if cidr in local_subnets:
+                continue   # 避免重复已扫网段
+            _collect(cidr)
+            if seen:
+                _last_fallback_hit.add(cidr)
+
+    return list(seen.values())
+
+
+def _safe_net_if_addrs() -> dict:
+    """安全调用 psutil.net_if_addrs()；失败时返回空字典。"""
+    try:
+        import psutil
+        return psutil.net_if_addrs()
+    except Exception:
+        return {}
+
+
+# 常见目标子网（CIDR）。当宿主机自动发现的子网为空、或用户未指定子网且
+# 自动发现未命中任何设备时，作为 fallback 扫描这些网段。
+# 绝大多数家用/办公局域网都落在这些网段内。
+COMMON_SUBNETS: list[str] = [
+    "192.168.31.0/24",   # 中国常见路由器默认网段
+    "192.168.1.0/24",    # TP-Link / 华为等默认
+    "192.168.0.0/24",    # 水星 / D-Link 等默认
+    "192.168.2.0/24",
+    "192.168.3.0/24",
+    "192.168.50.0/24",   # 小米路由器默认
+    "192.168.100.0/24",  # 部分光猫/运营商网关
+    "192.168.0.0/23",    # 512 口子网（合并 0.0 和 1.0）
+    "10.0.0.0/24",
+    "172.16.0.0/24",
+]
+
+# 标记：上次 fallback 实际扫到的子网，便于后续缓存/快速扫描。
+_last_fallback_hit: set[str] = set()
+
+
 def default_probe(ip: str, port: int, timeout: float = 0.5) -> bool:
     """默认 TCP 探活：尝试 connect，成功即端口开放。"""
     try:
