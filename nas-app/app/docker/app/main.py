@@ -20,6 +20,7 @@ from typing import Callable
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -110,6 +111,7 @@ def _http_get_json(ip: str, port: int, path: str = "/", timeout: float = 3.0) ->
 # 模板目录位于 app/templates/（容器内 /app/templates）。
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class _Unpaired(Exception):
@@ -229,6 +231,9 @@ def create_app(
       history_path               -> 历史文件路径
     """
     app = FastAPI(title="BetterGI Trigger NAS 应用")
+    # 挂载静态目录，供 index.html 引用 /static/bgi_icon.png 作为标题图标
+    if _STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     settings = Settings(config_path)
     history = HistoryStore(history_path or default_history_path())
     scan_fn = scanner or _default_scanner
@@ -425,16 +430,21 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"触发失败：{e}")
 
         job_id = result.get("job_id", "")
-        # 落盘第一个快照,带上 created_at (Unix 时间);finished_at 在后续轮询到终态时补填
+        # display_name 优先取 Windows 返回的实际展示名,否则回退 task_id
+        display_name = result.get("display_name") or body.task_id
+        # 落盘第一个快照,带上 created_at / display_name;
+        # finished_at 在后续轮询到终态时补填(keep_created_at 保最早的触发时间)
         history.record({
             "job_id": job_id,
             "task_id": body.task_id,
+            "display_name": display_name,            # 可读名称(如 "挖矿");历史展示用
             "state": "running",
-            "created_at": time.time(),               # 触发时刻;用于前端计算执行时间
+            "created_at": time.time(),                # 触发时刻;用于前端计算执行时间
             "finished_at": None,
         })
         result["task_id"] = body.task_id
-        result["created_at"] = time.time()           # 一并返回,前端可立即显示
+        result["display_name"] = display_name
+        result["created_at"] = time.time()            # 一并返回,前端可立即显示
         return result
 
     @app.get("/api/status")

@@ -113,7 +113,9 @@ def create_app(deps: AppDeps) -> FastAPI:
             raise HTTPException(status_code=409, detail="a job is already running")
         deps.launch(job, task)  # 非阻塞：守护线程内执行
         log.info("trigger accepted: job=%s task=%s groups=%s", job.id, task.id, task.groups)
-        return {"job_id": job.id}
+        # display_name 一并返回，供 NAS 历史显示任务可读名称（“挖矿” 而不是 “miner”）
+        return {"job_id": job.id, "task_id": task.id,
+                "display_name": task.display_name or task.id}
 
     @app.get("/status")
     def status(job_id: str, request: Request,
