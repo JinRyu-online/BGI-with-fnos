@@ -68,8 +68,10 @@ def create_app(deps: AppDeps) -> FastAPI:
             raise HTTPException(status_code=401, detail="unauthorized")
 
     @app.get("/health")
-    def health() -> dict:
+    def health(request: Request) -> dict:
         """免鉴权健康检查 + 身份签名。"""
+        client_ip = request.client.host if request.client else "?"
+        log.info("/health probe from %s", client_ip)
         return {"service": SERVICE_NAME, "hostname": deps.hostname, "version": deps.version}
 
     @app.get("/key")

@@ -19,4 +19,6 @@ COPY app/ /app/
 # 容器内监听 8000；host 网络模式下直接占用宿主 8000 端口。
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --log-level info: 让 bgi_trigger.* logger 的 INFO 级日志(关键节点/扫描诊断)输出到 stdout,
+# fnOS appcenter 通过 `docker logs` 可看到。
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

@@ -1,9 +1,9 @@
 """局域网设备发现模块。
 
-两部分：
+三部分：
 - list_local_subnets：枚举本机网卡，推导出局域网 CIDR（排除 loopback）。
-- scan_subnet：对某子网的每个 IP 做 TCP 探活，通的再请求 /health，
-  校验 service == "bgi-trigger" 才认定为 BetterGI 监听器。
+- scan_subnet / scan_subnet_parallel：对子网每个 IP 并行 TCP 探活 + /health 识别。
+- auto_discover_and_scan：自动发现子网 + 扫描；无果则回退扫 COMMON_SUBNETS。
 
 为便于单元测试，网卡枚举、TCP 探活、HTTP 请求均以可调用对象注入。
 默认实现用 psutil（纯 Python，无需 C 编译）+ socket + httpx。
@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 from typing import Callable
+
+log = logging.getLogger("bgi_trigger.discovery")
 
 
 def _extract(addr):
@@ -149,29 +152,39 @@ def auto_discover_and_scan(
     seen: dict[str, dict] = {}   # ip -> device dict，自然去重
 
     def _collect(cidr: str) -> None:
-        for d in scan_subnet_parallel(cidr, port, _probe, _http, max_workers):
+        devs = scan_subnet_parallel(cidr, port, _probe, _http, max_workers)
+        for d in devs:
             seen[d["ip"]] = d
+        if devs:
+            log.debug("auto-scan: %s -> hit %d device(s)", cidr, len(devs))
 
     # 1. 用户指定的子网
     if subnet:
+        log.info("auto-scan: explicit subnet %s", subnet)
         _collect(subnet)
         return list(seen.values())   # 显式子网：扫完即返回，不做 fallback
 
     # 2. 宿主机网卡自动发现的子网。容器（尤其是 host 网络无效时）网段可能无法
     #    直接反映 Windows 所在网段，所以这一步经常为空，需要 fallback。
-    local_subnets = list_local_subnets(addrs or _safe_net_if_addrs())
+    raw_addrs = addrs or _safe_net_if_addrs()
+    local_subnets = list_local_subnets(raw_addrs)
+    log.info("auto-scan: local subnets from %d interface(s) -> %s",
+             len(raw_addrs), local_subnets or "(none)")
     for s in local_subnets:
         _collect(s)
 
     # 3. fallback：auto 发现未命中任何设备 → 扫常见子网
-    if common_fallback and not seen:
+    if common_fallback and not seen and not local_subnets:
+        log.info("auto-scan: local subnets empty, fallback to COMMON_SUBNETS (%d ranges)",
+                 len(COMMON_SUBNETS))
         for cidr in COMMON_SUBNETS:
-            if cidr in local_subnets:
-                continue   # 避免重复已扫网段
             _collect(cidr)
             if seen:
                 _last_fallback_hit.add(cidr)
+                log.info("auto-scan: fallback hit %s -> %s", cidr, [d["ip"] for d in seen.values()])
+                break
 
+    log.info("auto-scan: done, found %d device(s)", len(seen))
     return list(seen.values())
 
 
