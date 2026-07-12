@@ -73,14 +73,16 @@ def test_get_returns_job_by_id():
 
 
 def test_abort_from_completing_to_aborted():
+    """abort 后槽位立即释放(current → None),历史保留 ABORTED 记录。"""
     store = JobStore()
     store.start("daily", ["g"])
     store.mark_completing("game_exited")
 
     store.abort()
 
-    assert store.current.state == JobState.ABORTED
+    assert store.current is None              # ★ 新语义:abort 后槽位立即释放
     assert store.is_idle() is True
+    assert store.history()[0].state == JobState.ABORTED
 
 
 def test_timeout_transitions_running_to_timeout():
@@ -132,8 +134,10 @@ def test_job_timestamps_and_elapsed():
 
 
 def test_abort_sets_finished_at():
+    """abort 后 finished_at 已记录在历史中,current 已释放(None)。"""
     store = JobStore()
     store.start("daily", ["g"])
     store.abort()
-    assert store.current.finished_at is not None
+    assert store.current is None                # ★ 新语义:槽位立即释放
+    assert store.history()[0].finished_at is not None
     assert store.history()[0].state == JobState.ABORTED

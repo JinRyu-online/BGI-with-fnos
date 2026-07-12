@@ -103,9 +103,22 @@ class Launcher:
 
         self._jobs.mark_completing(reason)
         # 反悔窗口：期间用户可通过 /abort 中止，跳过收尾。
-        self._sleep(self._grace)
+        # ★ 改用循环 + 检查 abort 信号,确保 abort 后立即退出,不阻塞 _grace 秒。
+        deadline = self._grace
+        while deadline > 0:
+            if self._jobs.abort_requested():
+                log.info("job %s abort requested during grace window; exiting immediately", job.id)
+                return
+            step = min(0.5, deadline)
+            self._sleep(step)
+            deadline -= step
+
+        # 再次取出 current:如果 abort 已清槽位,job 对象已被替换;跳过所有操作。
+        if self._jobs.current is not job:
+            log.info("job %s slot cleared (abort/restart); skipping finalize and after_done", job.id)
+            return
         if job.state == JobState.ABORTED:
-            log.info("job %s aborted during grace window; skipping after_done", job.id)
+            log.info("job %s aborted; skipping after_done", job.id)
             return
 
         final = JobState.DONE if reason != "timeout" else JobState.TIMEOUT

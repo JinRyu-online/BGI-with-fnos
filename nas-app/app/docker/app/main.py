@@ -145,70 +145,15 @@ def _default_config_path() -> str:
 
 
 def _default_scanner(subnet: str | None, port: int, *, progress_cb: Callable[[str, list[dict]], None] | None = None) -> list[dict]:
-    """按子网粒度扫描，每完成一个子网调 progress_cb(subnet, found_devices)。
+    """按子网粒度扫描，通过 progress_cb 每完成一个子网回调进度。
 
-    优化策略（解决容器内扫描慢的问题）：
-      - 跳过本地超大子网（prefix < 24，如 docker 网桥 172.17.0.0/16 = 65534 IP）
-      - 优先扫 COMMON_SUBNETS（家用常见网段，命中概率最高）
-      - 发现任一设备后立即停止，不再扫剩余网段
-      - 仅当 COMMON 全未命中时，补扫本地的 /24 子网
-
-    进度通过 progress_cb 逐子网回调，由 api_scan 接入 _progress_mark_subnet。
-    单独测试/使用时 progress_cb=None 即回退到静默模式。
+    扫描逻辑统一收敛到 discovery.auto_discover_and_scan,本函数只做
+    progress_cb → on_subnet_done 的适配,避免两处发散。
     """
-    import ipaddress
-    from discovery import _safe_net_if_addrs
-    _seen: dict[str, dict] = {}
-
-    def _scan_one(cidr: str) -> list[dict]:
-        from discovery import scan_subnet_parallel, default_probe, default_http_get
-        devs = scan_subnet_parallel(cidr, port, default_probe, default_http_get, max_workers=128)
-        for d in devs:
-            _seen[d["ip"]] = d
-        if devs:
-            log.info("scan hit %s -> %s", cidr, [d["ip"] for d in devs])
-        return devs
-
-    def _plan_and_scan(cidrs: list[str]) -> bool:
-        """扫描列表，遇到首个命中即返回 True（用于 early exit）。"""
-        for c in cidrs:
-            found = _scan_one(c)
-            if progress_cb:
-                progress_cb(c, found)
-            if _seen:
-                return True
-        return False
-
-    # 1. 用户指定的子网（唯一，无 fallback）
-    if subnet:
-        log.info("scan: explicit subnet %s", subnet)
-        _plan_and_scan([subnet])
-        return list(_seen.values())
-
-    # 收集本地 /24（丢弃 >/24 的大网段如 docker 网桥 /16, 避免扫几十万 IP）
-    local_small = []
-    for s in list_local_subnets(_safe_net_if_addrs()):
-        try:
-            net = ipaddress.ip_network(s, strict=False)
-            if net.prefixlen >= 24:          # 仅保留 /24 或更小（点对点 /30, /31, /32）
-                local_small.append(s)
-            else:
-                log.info("scan: skip large local subnet %s (%d hosts)", s, net.num_addresses)
-        except ValueError:
-            pass
-
-    # 2. 优先扫 COMMON（家用/办公网段最有可能命中, 每条 ≤ 254 IP）
-    log.info("scan: plan COMMON(%d ranges) first, local /24(%d) as fallback",
-             len(COMMON_SUBNETS), len(local_small))
-    if _plan_and_scan(COMMON_SUBNETS):
-        return list(_seen.values())
-
-    # 3. COMMON 全没命中 → 补扫本地 /24 子网
-    if local_small:
-        if _plan_and_scan(local_small):
-            return list(_seen.values())
-
-    return list(_seen.values())
+    return auto_discover_and_scan(
+        port=port, subnet=subnet, common_fallback=True, stop_on_first_hit=True,
+        max_workers=128, on_subnet_done=progress_cb,
+    )
 
 
 def _default_client_factory(url: str, api_key: str) -> ListenerClient:
@@ -432,19 +377,20 @@ def create_app(
         job_id = result.get("job_id", "")
         # display_name 优先取 Windows 返回的实际展示名,否则回退 task_id
         display_name = result.get("display_name") or body.task_id
+        # 关键:整个触发-完成周期内只取一次时间戳,避免多次 time.time() 漂移
+        t0 = time.time()
         # 落盘第一个快照,带上 created_at / display_name;
-        # finished_at 在后续轮询到终态时补填(keep_created_at 保最早的触发时间)
+        # finished_at 在后续轮询到终态时补填(prev_fields_fallback 保最早的触发时间/显示名)
         history.record({
             "job_id": job_id,
             "task_id": body.task_id,
             "display_name": display_name,            # 可读名称(如 "挖矿");历史展示用
             "state": "running",
-            "created_at": time.time(),                # 触发时刻;用于前端计算执行时间
+            "created_at": t0,                         # 触发时刻;用于前端计算执行时间
             "finished_at": None,
         })
-        result["task_id"] = body.task_id
         result["display_name"] = display_name
-        result["created_at"] = time.time()            # 一并返回,前端可立即显示
+        result["created_at"] = t0                    # 一并返回,前端可立即显示
         return result
 
     @app.get("/api/status")
@@ -466,7 +412,7 @@ def create_app(
         rec = {"job_id": job_id, "task_id": st.get("task_id", ""), "state": st.get("state", "")}
         if is_terminal:
             rec["finished_at"] = time.time()
-        history.record(rec, keep_created_at=True)
+        history.record(rec, prev_fields_fallback=True)
         return st
 
     @app.get("/api/jobs")

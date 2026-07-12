@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 
 class HistoryStore:
-    """任务历史存储：按 job_id 去重更新，保留最近 keep 条，最新在前。"""
+    """任务历史存储：按 job_id 去重更新，保留最近 keep 条，最新在前。
+
+    线程安全:_lock 保护 load + save 临界区,避免并发 /api/status 轮询丢写。
+    """
 
     def __init__(self, path: Path | str, keep: int = 50) -> None:
         self._path = Path(path)
         self._keep = keep
+        self._lock = threading.Lock()
 
     def _load(self) -> list[dict]:
         if not self._path.exists():
@@ -32,12 +37,16 @@ class HistoryStore:
             json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-    def record(self, entry: dict, *, keep_created_at: bool = False) -> None:
+    def record(self, entry: dict, *, prev_fields_fallback: bool = False) -> None:
         """记录/更新一条历史。同 job_id 覆盖；按最新在前排序；截断到 keep 条。
 
-        keep_created_at=True: 终态更新保留最早的 created_at(触发时刻)不被覆盖,
-        并保留已存在的 display_name / finished_at,让前端能准确计算耗时并显示任务名称。
+        prev_fields_fallback=True: 终态更新时,缺失字段(创建时刻/显示名/终态时间)
+        从同 job_id 的旧记录补充,让前端能准确计算耗时并显示任务名称。
         """
+        with self._lock:
+            self._record_locked(entry, prev_fields_fallback=prev_fields_fallback)
+
+    def _record_locked(self, entry: dict, *, prev_fields_fallback: bool) -> None:
         items = self._load()
         job_id = entry.get("job_id")
         prev = None
@@ -49,13 +58,10 @@ class HistoryStore:
             items = [x for x in items if x.get("job_id") != job_id]
         # 合并:entry 新值优先;缺失字段从 prev 补充
         merged = dict(entry)
-        if prev is not None:
-            if keep_created_at and "created_at" not in merged:
-                merged["created_at"] = prev.get("created_at")
-            if "finished_at" not in merged:
-                merged["finished_at"] = prev.get("finished_at")  # 保留终态时间
-            if "display_name" not in merged:
-                merged["display_name"] = prev.get("display_name")  # ★ 触发时的显示名必须保留
+        if prev is not None and prev_fields_fallback:
+            merged.setdefault("created_at", prev.get("created_at"))
+            merged.setdefault("finished_at", prev.get("finished_at"))
+            merged.setdefault("display_name", prev.get("display_name"))
         items.insert(0, merged)  # 最新在前
         items = items[: self._keep]
         self._save(items)

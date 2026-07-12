@@ -133,58 +133,82 @@ def auto_discover_and_scan(
     port: int = 8765,
     subnet: str | None = None,
     common_fallback: bool = True,
+    stop_on_first_hit: bool = True,
     addrs: dict | None = None,
     probe: Callable[[str, int], bool] | None = None,
     http_get: Callable[[str, int], dict | None] | None = None,
     max_workers: int = 128,
+    on_subnet_done: Callable[[str, list[dict]], None] | None = None,
 ) -> list[dict]:
     """自动发现子网 + 扫描；若仍无设备，回退扫描常见子网。
 
-    扫描顺序：
-      1. 用户通过 subnet 显式指定的子网（仅此一个）
-      2. 宿主机网卡自动发现的所有本地子网
-      3. （可选）COMMON_SUBNETS 列表 —— 覆盖绝大多数家用/办公网络
+    扫描顺序（优先命中概率高 + 扫描量小的网段）：
+      1. 用户通过 subnet 显式指定的子网（仅此一个，无 fallback）
+      2. COMMON_SUBNETS（家用常见网段，每条 ≤ 254 IP）
+      3. 本地 /24 子网（prefix ≥ 24，跳过 docker 网桥 /16 等）
+      4. （可选）本地超大网段作为最后兜底
 
-    返回所有环节发现的设备，按去重 IP 合并。
+    on_subnet_done(cidr, found_devices): 每完成一个子网回调,供前端进度条。
+    stop_on_first_hit: 发现任一设备后立即停止,不再扫剩余网段。
     """
+    import ipaddress
     _probe = probe or default_probe
     _http = http_get or default_http_get
     seen: dict[str, dict] = {}   # ip -> device dict，自然去重
 
-    def _collect(cidr: str) -> None:
+    def _collect(cidr: str) -> list[dict]:
         devs = scan_subnet_parallel(cidr, port, _probe, _http, max_workers)
         for d in devs:
             seen[d["ip"]] = d
         if devs:
-            log.debug("auto-scan: %s -> hit %d device(s)", cidr, len(devs))
+            log.info("scan hit %s -> %s", cidr, [d["ip"] for d in devs])
+        if on_subnet_done:
+            on_subnet_done(cidr, devs)
+        return devs
 
     # 1. 用户指定的子网
     if subnet:
-        log.info("auto-scan: explicit subnet %s", subnet)
+        log.info("scan: explicit subnet %s", subnet)
         _collect(subnet)
-        return list(seen.values())   # 显式子网：扫完即返回，不做 fallback
+        return list(seen.values())
 
-    # 2. 宿主机网卡自动发现的子网。容器（尤其是 host 网络无效时）网段可能无法
-    #    直接反映 Windows 所在网段，所以这一步经常为空，需要 fallback。
+    # 分类本地子网
     raw_addrs = addrs or _safe_net_if_addrs()
-    local_subnets = list_local_subnets(raw_addrs)
-    log.info("auto-scan: local subnets from %d interface(s) -> %s",
-             len(raw_addrs), local_subnets or "(none)")
-    for s in local_subnets:
+    local_small: list[str] = []   # /24 或更小
+    local_large: list[str] = []   # prefix < 24，如 docker /16
+    for s in list_local_subnets(raw_addrs):
+        try:
+            net = ipaddress.ip_network(s, strict=False)
+            if net.prefixlen >= 24:
+                local_small.append(s)
+            else:
+                local_large.append(s)
+                log.info("scan: defer large local subnet %s", s)
+        except ValueError:
+            pass
+
+    # 2. 优先扫 COMMON
+    log.info("scan: plan COMMON(%d) + local /24(%d) + local large(%d)",
+             len(COMMON_SUBNETS), len(local_small), len(local_large))
+    for cidr in COMMON_SUBNETS:
+        _collect(cidr)
+        if stop_on_first_hit and seen:
+            return list(seen.values())
+
+    # 3. 补扫本地 /24
+    for s in local_small:
         _collect(s)
+        if stop_on_first_hit and seen:
+            return list(seen.values())
 
-    # 3. fallback：auto 发现未命中任何设备 → 扫常见子网
-    if common_fallback and not seen and not local_subnets:
-        log.info("auto-scan: local subnets empty, fallback to COMMON_SUBNETS (%d ranges)",
-                 len(COMMON_SUBNETS))
-        for cidr in COMMON_SUBNETS:
-            _collect(cidr)
-            if seen:
-                _last_fallback_hit.add(cidr)
-                log.info("auto-scan: fallback hit %s -> %s", cidr, [d["ip"] for d in seen.values()])
-                break
+    # 4. 全没命中时回退扫本地大网段
+    if common_fallback and not seen:
+        for s in local_large:
+            _collect(s)
+            if stop_on_first_hit and seen:
+                return list(seen.values())
 
-    log.info("auto-scan: done, found %d device(s)", len(seen))
+    log.info("scan: done, found %d device(s)", len(seen))
     return list(seen.values())
 
 

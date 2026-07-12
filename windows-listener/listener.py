@@ -32,14 +32,13 @@ from pathlib import Path
 
 import uvicorn
 
+from bgi_trigger import __version__ as VERSION
 from bgi_trigger.api.app import AppDeps, create_app
 from bgi_trigger.service.auth import AuthState
 from bgi_trigger.service.config import ListenerConfig
 from bgi_trigger.core.launcher import Launcher
 from bgi_trigger.core.state import JobStore
 from bgi_trigger.core.tasks import TaskRegistry
-
-VERSION = "1.0.0"
 # 所有运行时文件均位于本脚本所在目录。
 BASE_DIR = Path(__file__).resolve().parent
 # 确保日志目录存在（pythonw 等无控制台场景依赖文件日志）
