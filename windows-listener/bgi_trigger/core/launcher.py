@@ -99,7 +99,7 @@ class Launcher:
     def _run(self, job: Job, task) -> None:
         """线程入口：捕获异常并标记 failed。"""
         try:
-            self._execute(job, task)
+            _BetterGIExecutor(self).execute(job, task)
         except Exception:
             log.exception("job %s failed", job.id)
             self._jobs.mark_completing("error")
@@ -121,7 +121,24 @@ def _cleanup_harvester(job_id: str) -> None:
     if h is not None:
         h.stop()
 
-    def _execute(self, job: Job, task) -> None:
+
+class _BetterGIExecutor:
+    """BetterGI 单任务执行体(从 Launcher 拆出,避免 _execute 缩进错误)。
+
+    由 Launcher._run 调用,封装从拉起进程到收尾的全流程。
+    """
+
+    def __init__(self, launcher: "Launcher") -> None:
+        self._exe = launcher._exe
+        self._game_processes = launcher._game_processes
+        self._log_path = launcher._log_path
+        self._log_keyword = launcher._log_keyword
+        self._grace = launcher._grace
+        self._jobs = launcher._jobs
+        self._popen = launcher._popen
+        self._sleep = launcher._sleep
+
+    def execute(self, job: Job, task) -> None:
         """实际执行流程（见模块文档）。"""
         cmd = build_command(self._exe, task.groups)
         log.info("launching BetterGI for job %s: %s", job.id, cmd)
