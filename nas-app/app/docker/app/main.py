@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -26,6 +27,8 @@ from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
 from history import HistoryStore, default_history_path
 from listener_client import ListenerAuthError, ListenerClient, ListenerError
 from settings import Settings
+
+log = logging.getLogger("bgi_trigger.main")
 
 # ---------- 子网级扫描进度（模块级，线程安全） ----------
 _scan_lock = threading.Lock()
