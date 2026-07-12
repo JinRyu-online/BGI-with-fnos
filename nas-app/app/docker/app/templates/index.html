@@ -28,6 +28,13 @@
     <h2>扫描设备</h2>
     <p class="muted">扫描局域网内的 BetterGI 监听器（首次使用点这里）。</p>
     <button id="btn-scan">🔍 扫描局域网</button>
+    <div class="device-row" style="margin-top:.75rem;">
+      <input id="scan-subnet" type="text" placeholder="手动指定子网 CIDR，留空则自动探测">
+      <button id="btn-scan-subnet" class="outline tiny">按子网扫描</button>
+    </div>
+    <p id="scan-empty-hint" class="muted" hidden>
+      未发现监听器？请确认 Windows 监听器已启动、并<strong>手动输入子网 CIDR</strong>（如 <code>192.168.31.0/24</code>）重试。
+    </p>
     <div id="scan-result"></div>
     <div id="pair-form" hidden>
       <label>密钥
@@ -85,12 +92,18 @@ async function refreshTarget() {
   } catch (e) { $('target-info').textContent = '读取配置失败：' + e.message; }
 }
 
-// 扫描
-$('btn-scan').onclick = async () => {
+// 扫描（带可选 subnet 覆盖）
+async function runScan() {
+  $('scan-empty-hint').hidden = true;
+  const subnet = $('scan-subnet').value.trim();
   $('scan-result').innerHTML = '<p class="muted">扫描中…（约 10-30 秒）</p>';
   try {
-    const { devices } = await api('POST', '/api/scan');
-    if (!devices.length) { $('scan-result').innerHTML = '<p class="err">未发现 BetterGI 监听器。</p>'; return; }
+    const { devices } = await api('POST', '/api/scan', subnet ? { subnet } : undefined);
+    if (!devices.length) {
+      $('scan-result').innerHTML = '<p class="err">未发现 BetterGI 监听器。</p>';
+      $('scan-empty-hint').hidden = false;  // 空结果时提示手动输入子网
+      return;
+    }
     $('scan-result').innerHTML = devices.map(d =>
       `<div class="device-row">
          <span>${d.hostname || '(未知主机)'} — ${d.ip}:${d.port}</span>
@@ -99,7 +112,9 @@ $('btn-scan').onclick = async () => {
     document.querySelectorAll('.device-row button').forEach(b =>
       b.onclick = () => { selected = b.dataset; $('pair-form').hidden = false; });
   } catch (e) { $('scan-result').innerHTML = '<p class="err">扫描失败：' + e.message + '</p>'; }
-};
+}
+$('btn-scan').onclick = runScan;
+$('btn-scan-subnet').onclick = runScan;
 let selected = null;
 
 // 配对
