@@ -286,14 +286,6 @@ function setScanRunning(running) {
   $('btn-scan').disabled = running;
   $('btn-cancel').hidden = !running;
 }
-$('btn-cancel').onclick = async () => {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  // 发请求让后端把进度强制置 done(通过再触发一轮无掩码扫描) — 简化:前端直接标记完成
-  const snap = await api('GET', '/api/scan-progress');
-  _progress_user_cancel = true;                                  // 见下文
-  finishScan({ ...snap, active: false, stage: 'done', error: '已取消' });
-};
-
 // 按钮事件绑定
 $('btn-scan').onclick = runScan;
 $('btn-scan-subnet').onclick = runScan;
@@ -367,8 +359,8 @@ async function loadTasks() {
 }
 $('btn-load-tasks').onclick = loadTasks;
 
-// 触发 + 轮询
-let pollTimer = null;
+// 触发 + 轮询（pollTimer 已在扫描区声明，此处置 null 清理）
+pollTimer = null;
 async function trigger(taskId) {
   try {
     const { job_id } = await api('POST', '/api/trigger', { task_id: taskId });
