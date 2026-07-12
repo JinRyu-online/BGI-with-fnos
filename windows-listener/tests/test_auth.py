@@ -1,6 +1,6 @@
 import pytest
 
-from auth import AuthState, AuthError
+from bgi_trigger.service.auth import AuthState, AuthError
 
 
 def test_correct_key_known_ip_passes():

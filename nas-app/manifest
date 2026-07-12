@@ -1,10 +1,10 @@
 appname               = bgi-trigger
-version               = 0.2.0
+version               = 0.2.1
 display_name          = BetterGI Trigger
 desc                  = 通过局域网 HTTP 触发 Windows 端 BetterGI 调度器组执行自动化作业，支持设备扫描配对、任务触发与状态回报。
 platform              = x86
 source                = thirdparty
-maintainer            = fnos-script-dev
-distributor           = fnos-script-dev
+maintainer            = Jinryu
+distributor           = Jinryu
 desktop_uidir         = ui
 desktop_applaunchname = bgi-trigger.Application

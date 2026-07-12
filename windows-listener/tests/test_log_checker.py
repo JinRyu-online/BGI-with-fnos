@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from execution import make_log_checker
+from bgi_trigger.core.execution import make_log_checker
 
 
 def test_log_checker_none_when_path_empty(tmp_path):

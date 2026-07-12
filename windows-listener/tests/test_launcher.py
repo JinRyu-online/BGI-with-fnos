@@ -1,6 +1,6 @@
 import pytest
 
-from launcher import after_done_command
+from bgi_trigger.core.launcher import after_done_command
 
 
 def test_sleep_returns_hibernate():

@@ -32,12 +32,12 @@ from pathlib import Path
 
 import uvicorn
 
-from app import AppDeps, create_app
-from auth import AuthState
-from config import ListenerConfig
-from launcher import Launcher
-from state import JobStore
-from tasks import TaskRegistry
+from bgi_trigger.api.app import AppDeps, create_app
+from bgi_trigger.service.auth import AuthState
+from bgi_trigger.service.config import ListenerConfig
+from bgi_trigger.core.launcher import Launcher
+from bgi_trigger.core.state import JobStore
+from bgi_trigger.core.tasks import TaskRegistry
 
 VERSION = "1.0.0"
 # 所有运行时文件均位于本脚本所在目录。

@@ -4,10 +4,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app import create_app, AppDeps
-from auth import AuthState
-from state import JobStore
-from tasks import TaskRegistry
+from bgi_trigger.api.app import create_app, AppDeps
+from bgi_trigger.service.auth import AuthState
+from bgi_trigger.core.state import JobStore
+from bgi_trigger.core.tasks import TaskRegistry
 
 AUTH = {"Authorization": "Bearer secret"}
 

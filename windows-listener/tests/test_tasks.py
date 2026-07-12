@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tasks import Task, TaskRegistry, TaskNotFound
+from bgi_trigger.core.tasks import Task, TaskRegistry, TaskNotFound
 
 
 def _task(id="daily", groups=None, **kw):

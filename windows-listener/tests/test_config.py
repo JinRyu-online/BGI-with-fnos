@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 
-from config import ListenerConfig
+from bgi_trigger.service.config import ListenerConfig
 
 
 def write_toml(path: Path, data: dict) -> None:

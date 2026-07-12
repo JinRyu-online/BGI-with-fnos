@@ -21,8 +21,8 @@ import threading
 import time
 from typing import Callable
 
-from execution import CompletionMonitor, build_command, make_game_checker, make_log_checker
-from state import Job, JobStore, JobState
+from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker, make_log_checker
+from bgi_trigger.core.state import Job, JobStore, JobState
 
 log = logging.getLogger("bgi_trigger.launcher")
 

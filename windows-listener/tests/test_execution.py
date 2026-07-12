@@ -1,6 +1,6 @@
 import pytest
 
-from execution import build_command, CompletionMonitor
+from bgi_trigger.core.execution import build_command, CompletionMonitor
 
 
 def test_build_command_with_groups():

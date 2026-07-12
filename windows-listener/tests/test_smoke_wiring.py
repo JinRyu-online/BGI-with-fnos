@@ -3,11 +3,11 @@ import socket
 
 from fastapi.testclient import TestClient
 
-from app import AppDeps, create_app
-from auth import AuthState
-from config import ListenerConfig
-from state import JobStore
-from tasks import TaskRegistry
+from bgi_trigger.api.app import AppDeps, create_app
+from bgi_trigger.service.auth import AuthState
+from bgi_trigger.service.config import ListenerConfig
+from bgi_trigger.core.state import JobStore
+from bgi_trigger.core.tasks import TaskRegistry
 
 HERE = __import__("pathlib").Path(__file__).resolve().parent.parent
 

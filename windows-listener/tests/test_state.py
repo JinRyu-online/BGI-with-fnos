@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from state import JobState, JobStore, Job, JobBusy
+from bgi_trigger.core.state import JobState, JobStore, Job, JobBusy
 
 
 def test_new_store_is_idle():

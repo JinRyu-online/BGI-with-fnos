@@ -20,9 +20,9 @@ from typing import Callable
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from auth import AuthError, AuthState
-from state import Job, JobStore
-from tasks import Task, TaskRegistry, TaskNotFound
+from bgi_trigger.service.auth import AuthError, AuthState
+from bgi_trigger.core.state import Job, JobStore
+from bgi_trigger.core.tasks import Task, TaskRegistry, TaskNotFound
 
 SERVICE_NAME = "bgi-trigger"  # NAS 扫描时 /health 返回的服务标识，必须固定
 log = logging.getLogger("bgi_trigger.app")
