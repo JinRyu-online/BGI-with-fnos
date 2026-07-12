@@ -32,14 +32,30 @@ class HistoryStore:
             json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-    def record(self, entry: dict) -> None:
-        """记录/更新一条历史。同 job_id 覆盖；按最新在前排序；截断到 keep 条。"""
+    def record(self, entry: dict, *, keep_created_at: bool = False) -> None:
+        """记录/更新一条历史。同 job_id 覆盖；按最新在前排序；截断到 keep 条。
+
+        keep_created_at=True: 终态更新保留最早的 created_at(触发时刻)不被覆盖,
+        让前端能准确计算"从触发到完成"的耗时。
+        """
         items = self._load()
         job_id = entry.get("job_id")
-        # 去重：移除同 job_id 的旧记录
+        prev = None
         if job_id is not None:
+            for x in items:
+                if x.get("job_id") == job_id:
+                    prev = x
+                    break
             items = [x for x in items if x.get("job_id") != job_id]
-        items.insert(0, entry)  # 最新在前
+        # 合并:保留最早的 created_at(若有需要),
+        # finished_at 取最新非空值
+        merged = dict(entry)
+        if prev is not None:
+            if keep_created_at and "created_at" not in merged:
+                merged["created_at"] = prev.get("created_at")
+            if prev.get("finished_at") and "finished_at" not in merged:
+                merged["finished_at"] = prev["finished_at"]
+        items.insert(0, merged)  # 最新在前
         items = items[: self._keep]
         self._save(items)
 

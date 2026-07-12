@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -46,15 +47,21 @@ class Job:
     state: JobState = JobState.RUNNING
     completion_reason: str = ""   # 完成判定的命中原因：game_exited / log_keyword / timeout / error
     log_lines: list[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)   # 任务启动时间(Unix time)
+    finished_at: float | None = None                       # 进入终态的时间;未完成则为 None
 
     def to_dict(self) -> dict:
         """序列化为 JSON 友好字典（供 /status 接口返回）。"""
+        now = time.time()
         return {
             "id": self.id,
             "task_id": self.task_id,
             "groups": list(self.groups),
             "state": self.state.value,
             "completion_reason": self.completion_reason,
+            "created_at": self.created_at,
+            "finished_at": self.finished_at,
+            "elapsed": (self.finished_at or now) - self.created_at,
         }
 
 
@@ -91,19 +98,21 @@ class JobStore:
         self._current.state = JobState.COMPLETING
 
     def finalize(self, state: JobState) -> None:
-        """将当前任务置为终态并归档进历史（按 keep_history 截断）。"""
+        """将当前任务置为终态并归档进历史（按 keep_history 截断）。自动记录 finished_at。"""
         if self._current is None:
             return
         self._current.state = state
+        self._current.finished_at = time.time()
         self._history.append(self._current)
         if len(self._history) > self._keep:
             self._history = self._history[-self._keep:]
 
     def abort(self) -> None:
-        """中止当前任务（直接置 aborted 并归档，跳过收尾动作）。"""
+        """中止当前任务（直接置 aborted 并归档，跳过收尾动作）。自动记录 finished_at。"""
         if self._current is None:
             return
         self._current.state = JobState.ABORTED
+        self._current.finished_at = time.time()
         self._history.append(self._current)
         if len(self._history) > self._keep:
             self._history = self._history[-self._keep:]

@@ -409,7 +409,7 @@ def create_app(
 
     @app.post("/api/trigger", status_code=202)
     def api_trigger(body: TriggerBody) -> dict:
-        """触发任务：转发到 Windows 监听器，并在 NAS 端记录历史。"""
+        """触发任务：转发到 Windows 监听器，并在 NAS 端记录历史(含 created_at 用于计算执行耗时)。"""
         try:
             client, _ = _client_from_config()
         except _Unpaired:
@@ -422,10 +422,17 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"触发失败：{e}")
 
         job_id = result.get("job_id", "")
+        # 落盘第一个快照,带上 created_at (Unix 时间);finished_at 在后续轮询到终态时补填
         history.record({
-            "job_id": job_id, "task_id": body.task_id, "state": "running"
+            "job_id": job_id,
+            "task_id": body.task_id,
+            "state": "running",
+            "created_at": time.time(),               # 触发时刻;用于前端计算执行时间
+            "finished_at": None,
         })
-        return {"job_id": job_id}
+        result["task_id"] = body.task_id
+        result["created_at"] = time.time()           # 一并返回,前端可立即显示
+        return result
 
     @app.get("/api/status")
     def api_status(job_id: str) -> dict:
@@ -441,9 +448,12 @@ def create_app(
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"查询失败：{e}")
 
-        history.record({
-            "job_id": job_id, "task_id": st.get("task_id", ""), "state": st.get("state", "")
-        })
+        # 终态时补填 finished_at,保留最早触发的 created_at（不覆盖）
+        is_terminal = st.get("state") in ("done", "timeout", "failed", "aborted")
+        rec = {"job_id": job_id, "task_id": st.get("task_id", ""), "state": st.get("state", "")}
+        if is_terminal:
+            rec["finished_at"] = time.time()
+        history.record(rec, keep_created_at=True)
         return st
 
     @app.get("/api/jobs")

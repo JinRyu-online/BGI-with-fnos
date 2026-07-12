@@ -92,6 +92,7 @@
     .g-arrow { color:#9ca3af; font-size:.7rem; }
     .task-props { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; margin-top:.2rem; }
     .task-props .prop { font-size:.72rem; color:#6b7280; }
+    .job-timer { margin-top:.2rem; color:#6b7280; }
   </style>
 </head>
 <body>
@@ -119,10 +120,16 @@
       <button id="btn-cancel" class="outline secondary btn tiny" hidden>⏹ 停止扫描</button>
     </div>
     <details style="margin-top:.75rem;">
-      <summary class="hint" style="cursor:pointer;">高级：手动指定子网</summary>
-      <div class="btn-row" style="margin-top:.5rem;">
-        <input id="scan-subnet" type="text" placeholder="如 192.168.31.0/24，留空用自动扫描">
-        <button id="btn-scan-subnet" class="outline btn tiny">按子网扫描</button>
+      <summary class="hint" style="cursor:pointer;">高级：手动指定 IP / 子网</summary>
+      <div style="margin-top:.5rem; display:flex; flex-direction:column; gap:.4rem;">
+        <div class="btn-row">
+          <input id="scan-ip" type="text" placeholder="单 IP，如 192.168.31.43">
+          <button id="btn-scan-ip" class="outline btn tiny">扫这一个 IP</button>
+        </div>
+        <div class="btn-row">
+          <input id="scan-subnet" type="text" placeholder="子网 CIDR，如 192.168.31.0/24">
+          <button id="btn-scan-subnet" class="outline btn tiny">按子网扫描</button>
+        </div>
       </div>
     </details>
     <p id="scan-empty-hint" class="alert warn" hidden>
@@ -294,6 +301,21 @@ function setScanRunning(running) {
   $('btn-scan').disabled = running;
   $('btn-cancel').hidden = !running;
 }
+// 单 IP 扫描：把 192.168.31.43 包装为 192.168.31.43/32 走子网扫描接口
+function scanSingleIp() {
+  const ip = $('scan-ip').value.trim();
+  if (!ip) { alert('请先输入 IP'); return; }
+  // 自动补 /32
+  const cidr = ip.includes('/') ? ip : `${ip}/32`;
+  // 复用 runScan 但临时把值塞进 scan-subnet
+  const subnetInput = $('scan-subnet');
+  const prev = subnetInput.value;
+  subnetInput.value = cidr;
+  runScan();
+  subnetInput.value = prev;   // 还原,不影响用户下次输入
+}
+$('btn-scan-ip').onclick = scanSingleIp;
+
 // 按钮事件绑定
 $('btn-scan').onclick = runScan;
 $('btn-scan-subnet').onclick = runScan;
@@ -407,14 +429,35 @@ async function loadJobs() {
     if (!jobs.length) { $('jobs').innerHTML = '<p class="empty">暂无历史</p>'; return; }
     const stateLabel = { running: '运行中', completing: '收尾中', done: '✅ 已完成',
                          timeout: '⏰ 超时', failed: '❌ 失败', aborted: '🚫 已中止' };
-    $('jobs').innerHTML = jobs.map(j => `
-      <div class="job-row">
+    const fmtDuration = (sec) => {
+      sec = Math.max(0, Math.floor(sec || 0));
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      if (h) return `${h}h ${m}m ${s}s`;
+      if (m) return `${m}m ${s}s`;
+      return `${s}s`;
+    };
+    const fmtTime = (ts) => {
+      if (!ts) return '–';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString('zh-CN', { hour12: false });
+    };
+    $('jobs').innerHTML = jobs.map(j => {
+      // 优先用 NAS 端记录的 created_at/finished_at;否则回退到 Windows listener 返回的 elapsed
+      const startedAt = j.created_at ? fmtTime(j.created_at) : '–';
+      const finishedAt = j.finished_at ? fmtTime(j.finished_at) : (j.state === 'running' ? '进行中' : '–');
+      const elapsedSec = (j.created_at && j.finished_at) ? (j.finished_at - j.created_at)
+                      : (j.elapsed || null);
+      const elapsedTxt = elapsedSec != null ? fmtDuration(elapsedSec)
+                       : (j.state === 'running' ? '进行中…' : '–');
+      return `<div class="job-row">
         <span class="tag ${j.state}">${stateLabel[j.state] || j.state}</span>
         <div class="meta">
           <div class="sub"><b>任务名称</b> ${j.task_id}</div>
           <div class="sub"><b>任务ID</b> <code>${j.job_id}</code></div>
+          <div class="sub job-timer">⏱ 用时 <strong>${elapsedTxt}</strong> · 开始 ${startedAt} · 结束 ${finishedAt}</div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch (e) { $('jobs').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; }
 }
 $('btn-load-jobs').onclick = loadJobs;

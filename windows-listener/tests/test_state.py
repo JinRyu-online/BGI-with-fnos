@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from state import JobState, JobStore, Job, JobBusy
@@ -102,3 +104,36 @@ def test_clear_resets_to_idle_without_history_loss():
     assert store.current is None
     assert store.is_idle() is True
     assert len(store.history()) == 1
+
+
+def test_job_timestamps_and_elapsed():
+    """Job 应在创建时带 created_at,终态时带 finished_at,elapsed 自动计算。"""
+    store = JobStore()
+    t0 = time.time()
+    job = store.start("daily", ["g"])
+    assert job.created_at >= t0
+    assert job.finished_at is None
+
+    d = job.to_dict()
+    assert "created_at" in d and "finished_at" in d and "elapsed" in d
+    assert d["finished_at"] is None
+    assert d["elapsed"] >= 0
+
+    time.sleep(0.01)
+    store.mark_completing("game_exited")
+    store.finalize(JobState.DONE)
+
+    assert store.current.finished_at is not None
+    assert store.current.finished_at >= store.current.created_at
+
+    d2 = store.current.to_dict()
+    assert d2["elapsed"] >= 0.01
+    assert d2["finished_at"] >= d2["created_at"]
+
+
+def test_abort_sets_finished_at():
+    store = JobStore()
+    store.start("daily", ["g"])
+    store.abort()
+    assert store.current.finished_at is not None
+    assert store.history()[0].state == JobState.ABORTED
