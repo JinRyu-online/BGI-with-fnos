@@ -108,6 +108,20 @@
     .job-field-label { display:inline-block; min-width:4.5rem; font-size:.78rem; color:#64748b; font-weight:500; }
     .job-field-val { font-size:.85rem; color:#1e293b; font-weight:600; }
     .job-field-name { color:#1d4ed8; }
+    .status-card .status-row { display:flex; align-items:center; gap:.8rem; }
+    .status-indicator { width:.9rem; height:.9rem; border-radius:50%; background:#cbd5e1; flex-shrink:0; animation:none; }
+    .status-indicator.is-idle { background:#cbd5e1; }
+    .status-indicator.is-running { background:#f59e0b; animation:pulse 1.5s infinite; }
+    .status-indicator.is-completing { background:#3b82f6; animation:pulse 1.5s infinite; }
+    .status-indicator.is-done { background:#22c55e; }
+    .status-indicator.is-timeout { background:#f97316; }
+    .status-indicator.is-failed, .status-indicator.is-aborted { background:#ef4444; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+    .status-text { display:flex; align-items:baseline; gap:.35rem; flex-wrap:wrap; }
+    .status-text .tag { font-size:.95rem; padding:.35rem .85rem; }
+    .status-detail { font-size:.85rem; color:#64748b; }
+    .status-meta { margin-top:.6rem; font-size:.8rem; color:#64748b; }
+    .status-meta:empty { display:none; }
     .job-timer { margin-top:.2rem; color:#6b7280; }
   </style>
 </head>
@@ -170,9 +184,15 @@
   </section>
 
   <!-- ===== 运行状态卡 ===== -->
-  <section class="card">
-    <h2>📊 运行状态</h2>
-    <p id="run-status" class="tag idle">空闲</p>
+  <section class="card status-card">
+    <div class="status-row">
+      <div class="status-indicator" id="status-indicator"></div>
+      <div class="status-text">
+        <span id="run-status" class="tag idle">空闲</span>
+        <span id="status-detail" class="status-detail"></span>
+      </div>
+    </div>
+    <div id="status-meta" class="status-meta"></div>
   </section>
 
   <!-- ===== 历史卡 ===== -->
@@ -405,7 +425,7 @@ async function loadTasks() {
               <span class="prop-pill time"><span class="prop-emoji">⏱</span>执行 ${t.timeout_min}分钟</span>
             </div>
             <div class="task-prop-row">
-              <span class="prop-pill after"><span class="prop-emoji">🏁</span>${afterLabel[t.after_done] || t.after_done}</span>
+              <span class="prop-pill after">${afterLabel[t.after_done] || t.after_done}</span>
             </div>
           </div>
         </div>
@@ -422,22 +442,52 @@ pollTimer = null;
 async function trigger(taskId) {
   try {
     const { job_id } = await api('POST', '/api/trigger', { task_id: taskId });
-    setRunStatus('running', `任务已触发 · job=${job_id}`);
-    pollStatus(job_id);
-  } catch (e) { setRunStatus('failed', `触发失败：${e.message}`); }
+    setRunStatus('running', '运行中', '任务已触发');
+    setJobMeta(`任务ID <code>${job_id}</code> · 启动时间 ${fmtTimeStr(Date.now()/1000)}`);
+    pollStatus(job_id, Date.now());
+  } catch (e) { setRunStatus('failed', '失败', e.message); setJobMeta(null); }
 }
-function setRunStatus(kind, text) {
-  $('run-status').className = 'tag ' + kind;
-  $('run-status').innerHTML = text;
+function fmtTimeStr(ts) {
+  const d = new Date((ts || 0) * 1000);
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
-function pollStatus(jobId) {
+function setRunStatus(kind, text, detail) {
+  const tag = $('run-status');
+  tag.className = 'tag ' + kind;
+  tag.textContent = text;
+  // 指标点颜色
+  const ind = $('status-indicator');
+  ind.className = 'status-indicator is-' + kind;
+  // 副标题(可选)
+  if (detail !== undefined) {
+    $('status-detail').textContent = detail ? '  ·  ' + detail : '';
+  }
+}
+function setJobMeta(html) {
+  const el = $('status-meta');
+  if (html) { el.innerHTML = html; el.style.display = ''; }
+  else { el.innerHTML = ''; el.style.display = 'none'; }
+}
+function pollStatus(jobId, startedMs) {
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     try {
       const st = await api('GET', '/api/status?job_id=' + jobId);
+      const stateText = { running: '运行中', completing: '收尾中', done: '已完成',
+                          timeout: '超时', failed: '失败', aborted: '已中止' };
+      const stateDetail = st.completion_reason ? `（${st.completion_reason}）` : '';
+      const elapsedSec = startedMs ? Math.floor((Date.now() - startedMs) / 1000) : null;
+      const elapsedTxt = elapsedSec != null ? `${elapsedSec}s` : '';
+      setRunStatus(st.state, stateText[st.state] || st.state, stateDetail);
+      setJobMeta(`任务ID <code>${jobId}</code>${elapsedTxt ? ' · 已运行 ' + elapsedTxt : ''}`);
       const terminal = ['done','timeout','failed','aborted'].includes(st.state);
-      setRunStatus(st.state, `job=${jobId} · ${st.state}${st.completion_reason ? ' · ' + st.completion_reason : ''}`);
-      if (terminal) { clearInterval(pollTimer); loadJobs(); }
+      if (terminal) {
+        clearInterval(pollTimer);
+        const finalElapsed = startedMs ? ` · 总耗时 ${Math.floor((Date.now()-startedMs)/1000)}s` : '';
+        setRunStatus(st.state, stateText[st.state] || st.state, stateDetail + finalElapsed);
+        setJobMeta(`任务ID <code>${jobId}</code>${finalElapsed}`);
+        loadJobs();
+      }
     } catch (e) { /* 暂时错误，继续轮询 */ }
   }, 10000);
 }
@@ -485,7 +535,8 @@ async function loadJobs() {
 $('btn-load-jobs').onclick = loadJobs;
 
 // 初始化
-setRunStatus('idle', '空闲');
+setRunStatus('idle', '空闲', '等待任务触发');
+setJobMeta(null);
 refreshTarget().then(() => { if ($('btn-unpair').hidden === false) loadTasks(); });
 loadJobs();
 </script>

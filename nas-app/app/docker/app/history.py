@@ -36,7 +36,7 @@ class HistoryStore:
         """记录/更新一条历史。同 job_id 覆盖；按最新在前排序；截断到 keep 条。
 
         keep_created_at=True: 终态更新保留最早的 created_at(触发时刻)不被覆盖,
-        让前端能准确计算"从触发到完成"的耗时。
+        并保留已存在的 display_name / finished_at,让前端能准确计算耗时并显示任务名称。
         """
         items = self._load()
         job_id = entry.get("job_id")
@@ -47,14 +47,15 @@ class HistoryStore:
                     prev = x
                     break
             items = [x for x in items if x.get("job_id") != job_id]
-        # 合并:保留最早的 created_at(若有需要),
-        # finished_at 取最新非空值
+        # 合并:entry 新值优先;缺失字段从 prev 补充
         merged = dict(entry)
         if prev is not None:
             if keep_created_at and "created_at" not in merged:
                 merged["created_at"] = prev.get("created_at")
-            if prev.get("finished_at") and "finished_at" not in merged:
-                merged["finished_at"] = prev["finished_at"]
+            if "finished_at" not in merged:
+                merged["finished_at"] = prev.get("finished_at")  # 保留终态时间
+            if "display_name" not in merged:
+                merged["display_name"] = prev.get("display_name")  # ★ 触发时的显示名必须保留
         items.insert(0, merged)  # 最新在前
         items = items[: self._keep]
         self._save(items)
