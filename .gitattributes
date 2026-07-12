@@ -1,4 +1,2 @@
-# Windows 批处理脚本以 GBK 编码 + CRLF 保存（中文 Windows 原生代码页），
-# 标记为 binary 防止 git 做行尾/编码转换破坏中文与执行。
-*.bat binary
+# .cmd 标记为 binary 防止 git 做行尾/转换破坏执行。
 *.cmd binary

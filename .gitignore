@@ -4,7 +4,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# Windows listener 运行时生成文件（由 install.bat 从 .example 生成，勿提交）
+# Windows listener 运行时生成文件（由 install.ps1 从 .example 生成，勿提交）
 windows-listener/venv/
 windows-listener/config.toml
 windows-listener/tasks/tasks.json

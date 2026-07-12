@@ -9,7 +9,7 @@ NAS 端应用：扫描局域网内的 Windows 监听器、配对、触发 Better
 ```bash
 # 1. 装 fnpack（见 打包说明.md §1）
 # 2. 打包
-./build.sh                # 或 build.bat（Windows）
+./build.sh                # 或 build.ps1（Windows）
 # 3. 产出 bgi-trigger.fpk，安装到飞牛 NAS
 ```
 
@@ -41,7 +41,7 @@ nas-app/
 │           ├── history.py       任务历史持久化
 │           ├── requirements.txt
 │           └── templates/index.html
-├── build.sh / build.bat     打包脚本
+├── build.sh / build.ps1     打包脚本
 └── README.md / 打包说明.md
 ```
 

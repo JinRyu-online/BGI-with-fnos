@@ -28,7 +28,7 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 ## 部署
 
 1. 把整个 `windows-listener/` 目录拷到目标机（如 `D:\bgi_trigger\`）。
-2. 以管理员身份运行 `install.bat`：
+2. 以管理员身份运行 `install.ps1`：
    - 建 venv、装依赖；
    - 从 `.example` 生成 `config.toml` 与 `tasks/tasks.json`；
    - 注册计划任务 `BGI-Trigger-Listener`（登录后自启 + 最高权限 + 失败重启）。
@@ -42,7 +42,7 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 
 ```
 windows-listener/tasks/
-├── tasks.json          实际任务清单（install.bat 从 .example 生成）
+├── tasks.json          实际任务清单（install.ps1 从 .example 生成）
 └── tasks.json.example
 ```
 
@@ -99,14 +99,14 @@ windows-listener/tasks/
 
 ## 依赖与镜像（国内友好）
 
-`install.bat` 的依赖安装策略：
+`install.ps1` 的依赖安装策略：
 
 - **镜像**：默认走清华 PyPI 镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`，国内下载快。
 - **包管理器**：优先用 **uv**（Python 版 pnpm，Astral 出品，安装快、并发下载），uv 不可用时自动回退到 pip。
   - uv 先由 `pip` 装入 venv，再由 uv 安装 `requirements.txt`。
   - 镜像通过环境变量 `UV_INDEX_URL` 注入（uv 原生支持）。
 
-切换镜像只需改 `install.bat` 顶部的 `MIRROR` 变量，可选：
+切换镜像只需改 `install.ps1` 顶部的 `$MIRROR` 变量，可选：
 
 | 镜像 | 地址 |
 |---|---|
@@ -114,7 +114,7 @@ windows-listener/tasks/
 | 阿里云 | `https://mirrors.aliyun.com/pypi/simple` |
 | 腾讯云 | `https://mirrors.cloud.tencent.com/pypi/simple` |
 
-手动装依赖（不走 install.bat）：
+手动装依赖（不走 install.ps1）：
 
 ```bash
 # 用 uv（推荐，快）
