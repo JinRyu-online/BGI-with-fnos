@@ -90,8 +90,13 @@
     .g-step { font-size:.72rem; padding:.15rem .45rem; border-radius:6px; background:#eef0f3; color:#374151; }
     .g-step.last { background:#dbeafe; color:#1e40af; font-weight:600; }
     .g-arrow { color:#9ca3af; font-size:.7rem; }
-    .task-props { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; margin-top:.2rem; }
-    .task-props .prop { font-size:.72rem; color:#6b7280; }
+    .task-props { display:flex; flex-direction:column; gap:.45rem; margin-top:.35rem; }
+    .task-prop-row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
+    .prop-pill { display:inline-flex; align-items:center; gap:.3rem; font-size:.78rem; font-weight:600; padding:.35rem .75rem; border:1px solid transparent; border-radius:8px; white-space:nowrap; }
+    .prop-pill .prop-emoji { font-size:.9rem; }
+    .prop-pill.time { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+    .prop-pill.after { background:#f0fdf4; color:#065f46; border-color:#bbf7d0; }
+    .prop-pill.id   { background:#f8fafc; color:#475569; border-color:#e2e8f0; font-weight:500; font-family:ui-monospace, SFMono-Regular, monospace; font-size:.74rem; }
     .job-timer { margin-top:.2rem; color:#6b7280; }
   </style>
 </head>
@@ -384,9 +389,15 @@ async function loadTasks() {
           <div class="name">${t.display_name}</div>
           <div class="groups">${t.groups.map((g,i)=>`<span class="g-step${i===t.groups.length-1?' last':''}">${g}</span>`).join('<span class="g-arrow">→</span>')}</div>
           <div class="task-props">
-            <span class="prop">执行时长 ⏱ ${t.timeout_min}分钟</span>
-            <span class="prop">结束后操作 ${afterLabel[t.after_done] || t.after_done}</span>
-            <span class="prop tag idle">${t.id}</span>
+            <div class="task-prop-row">
+              <span class="prop-pill time"><span class="prop-emoji">⏱</span>执行 ${t.timeout_min}分钟</span>
+            </div>
+            <div class="task-prop-row">
+              <span class="prop-pill after"><span class="prop-emoji">🏁</span>${afterLabel[t.after_done] || t.after_done}</span>
+            </div>
+            <div class="task-prop-row">
+              <span class="prop-pill id">${t.id}</span>
+            </div>
           </div>
         </div>
         <button class="primary btn tiny" data-id="${t.id}" title="触发任务">▶ 执行</button>
