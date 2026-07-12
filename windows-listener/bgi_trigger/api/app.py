@@ -13,16 +13,19 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Callable
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from bgi_trigger.service.auth import AuthError, AuthState
 from bgi_trigger.core.state import Job, JobStore
 from bgi_trigger.core.tasks import Task, TaskRegistry, TaskNotFound
+from bgi_trigger.core.launcher import get_harvester
 
 SERVICE_NAME = "bgi-trigger"  # NAS 扫描时 /health 返回的服务标识，必须固定
 log = logging.getLogger("bgi_trigger.app")
@@ -111,6 +114,11 @@ def create_app(deps: AppDeps) -> FastAPI:
         except Exception:
             log.warning("trigger refused: slot busy for task_id=%s from %s", body.task_id, client_ip)
             raise HTTPException(status_code=409, detail="a job is already running")
+        # ★ 注入 BetterGI 日志路径:有日志才启动收割器供 WS 推流
+        # 用 getattr 安全访问:测试用 AppDeps 可能不含 bettergi 字段
+        cfg = getattr(deps, "bettergi", None)
+        job.log_path = cfg.log_path if cfg and cfg.log_path else ""
+        log.info("job %s log_path=%s", job.id, job.log_path or "(none)")
         deps.launch(job, task)  # 非阻塞：守护线程内执行
         log.info("trigger accepted: job=%s task=%s groups=%s", job.id, task.id, task.groups)
         # display_name 一并返回，供 NAS 历史显示任务可读名称（“挖矿” 而不是 “miner”）
@@ -141,5 +149,65 @@ def create_app(deps: AppDeps) -> FastAPI:
         deps.jobs.abort()
         log.info("abort accepted: job=%s (from %s)", deps.jobs.current.id if deps.jobs.current else "?", client_ip)
         return {"aborted": True}
+
+    # ★★★ WebSocket 端点:浏览器直接连此端点获取实时日志 ★★★
+    @app.websocket("/ws/logs/{job_id}")
+    async def ws_logs(websocket: WebSocket, job_id: str) -> None:
+        """实时推送 BetterGI 日志给前端。
+
+        协议:
+          → 客户端连接即推送最近 3 条历史 + 最新任务状态
+          → 之后每条新日志以 {"ts","lines":[...]} 推送
+          → 任务结束时最后推一条 {"last":True, "state":"done/..."} 后关闭
+        安全: 无需鉴权(MVP 内网,同 NAS 当前模型);IP 取自 X-Forwarded-For 或 client。
+        """
+        await websocket.accept()
+        harvester = get_harvester(job_id)
+        if harvester is None:
+            await websocket.send_json({"error": f"no running job: {job_id}"})
+            await websocket.close(code=1008)
+            return
+
+        # 注册 asyncio event loop(异步桥的关键)
+        harvester.attach_loop(asyncio.get_running_loop())
+
+        # 推送最近 3 条
+        recent = harvester.recent(3)
+        if recent:
+            await websocket.send_json({"ts": time.time(), "lines": recent})
+
+        # 状态快照
+        try:
+            job_snapshot = deps.jobs.get(job_id)
+            if job_snapshot:
+                await websocket.send_json({"state": job_snapshot.to_dict()})
+        except Exception:
+            pass
+
+        # ★ 主循环: 等新行 or 收割器退出 or 客户端断开
+        try:
+            while True:
+                new = await harvester.wait_new(timeout=2.0)
+                if new:
+                    await websocket.send_json({
+                        "ts": time.time(),
+                        "lines": harvester.recent(1),     # 推送最新一条
+                    })
+                # 退出条件
+                if harvester.finished:
+                    break
+        except WebSocketDisconnect:
+            log.info("ws/logs/%s: client disconnected", job_id)
+        except Exception:
+            log.exception("ws/logs/%s error", job_id)
+        finally:
+            # 关闭前发一次状态
+            try:
+                if not harvester.finished:
+                    await websocket.send_json({"state": (deps.jobs.get(job_id) or {}).to_dict()
+                                               if deps.jobs.get(job_id) else {"state": "unknown"}})
+            except Exception:
+                pass
+            await websocket.close()
 
     return app

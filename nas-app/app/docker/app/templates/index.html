@@ -108,6 +108,18 @@
     .job-field-label { display:inline-block; min-width:4.5rem; font-size:.78rem; color:#64748b; font-weight:500; }
     .job-field-val { font-size:.85rem; color:#1e293b; font-weight:600; }
     .job-field-name { color:#1d4ed8; }
+    .task-log-wrap { margin-top:.5rem; width:100%; }
+    .task-log-toggle { font-size:.75rem; padding:.2rem .5rem !important; }
+    .task-log-box { margin-top:.4rem; background:#0f172a; border-radius:8px; padding:.6rem .8rem; max-height:140px; overflow-y:auto; border:1px solid #1e293b; }
+    .task-log-box[hidden] { display:none; }
+    .task-log-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; font-size:.78rem; color:#94a3b8; }
+    .task-log-pre { margin:0; font-size:.72rem; line-height:1.5; color:#e2e8f0; white-space:pre-wrap; word-break:break-all; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .task-log-pre .muted { color:#64748b; }
+    .task-log-pre .log-line { display:block; padding:.05rem 0; border-bottom:1px solid rgba(255,255,255,.04); }
+    .task-log-status { font-size:.7rem; padding:.15rem .45rem; }
+    .ws-dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%; margin-right:.3rem; background:#64748b; }
+    .ws-dot.connected { background:#22c55e; }
+    .ws-dot.error { background:#ef4444; }
     .status-card .status-row { display:flex; align-items:center; gap:.8rem; }
     .status-indicator { width:.9rem; height:.9rem; border-radius:50%; background:#cbd5e1; flex-shrink:0; animation:none; }
     .status-indicator.is-idle { background:#cbd5e1; }
@@ -393,6 +405,8 @@ $('btn-pair').onclick = async () => {
   if (!selected) return;
   try {
     await api('POST', '/api/pair', { ip: selected.ip, port: +selected.port, hostname: selected.host, api_key: selected.api_key });
+    // ★ 配对成功后注入 Windows 主机信息,供日志 WS 直连(不经 NAS 中转)
+    setLogTarget(selected.ip, +selected.port);
     $('pair-form').hidden = true;
     await refreshTarget();
     await loadTasks();
@@ -414,8 +428,9 @@ async function loadTasks() {
     $('task-count').textContent = tasks.length;
     if (!tasks.length) { $('tasks').innerHTML = '<p class="empty">无任务</p>'; return; }
     const afterLabel = { sleep: '💤 休眠', shutdown: '⏻ 关机', lock: '🔒 锁屏', none: '⏸ 不操作' };
+    const w=_w();  // Windows listener IP/端口(由 /api/config 提供后注入)
     $('tasks').innerHTML = tasks.map(t => `
-      <div class="task-row">
+      <div class="task-row" data-task-id="${t.id}">
         <div class="meta">
           <div class="task-name-badge">${t.display_name}</div>
           <div class="task-id">${t.id}</div>
@@ -428,11 +443,23 @@ async function loadTasks() {
               <span class="prop-pill after">${afterLabel[t.after_done] || t.after_done}</span>
             </div>
           </div>
+          <div class="task-log-wrap">
+            <button class="outline btn tiny task-log-toggle" data-task="${t.id}">📋 日志</button>
+            <div class="task-log-box" id="log-box-${t.id}" hidden>
+              <div class="task-log-header">
+                <span>BetterGI 实时日志</span>
+                <span class="task-log-status tag idle" id="log-status-${t.id}">等待中</span>
+              </div>
+              <pre class="task-log-pre" id="log-pre-${t.id}"><i class="muted">点击「日志」连接 Windows 监听器...</i></pre>
+            </div>
+          </div>
         </div>
         <button class="primary btn tiny" data-id="${t.id}" title="触发任务">▶ 执行</button>
       </div>`).join('');
-    document.querySelectorAll('#tasks .task-row button').forEach(b =>
+    document.querySelectorAll('#tasks .task-row button[data-id]').forEach(b =>
       b.onclick = () => trigger(b.dataset.id));
+    document.querySelectorAll('.task-log-toggle').forEach(b =>
+      b.onclick = () => toggleTaskLog(b.dataset.task));
   } catch (e) { $('tasks').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; $('task-count').textContent = '!'; }
 }
 $('btn-load-tasks').onclick = loadTasks;
@@ -496,6 +523,7 @@ function pollStatus(jobId, startedMs) {
 async function loadJobs() {
   try {
     const jobs = await api('GET', '/api/jobs');
+    _latestJobs = jobs;  // ★ 缓存最新 job 列表,供日志面板连接 WS 时定位 running job_id
     if (!jobs.length) { $('jobs').innerHTML = '<p class="empty">暂无历史</p>'; return; }
     const stateLabel = { running: '运行中', completing: '收尾中', done: '✅ 已完成',
                          timeout: '⏰ 超时', failed: '❌ 失败', aborted: '🚫 已中止' };
@@ -533,6 +561,105 @@ async function loadJobs() {
   } catch (e) { $('jobs').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; }
 }
 $('btn-load-jobs').onclick = loadJobs;
+
+// ============================================================
+// ★ Windows 日志实时展示：浏览器直连 Windows listener WS ★
+// ============================================================
+let _winHost = null;      // {ip, port}，由配对信息注入
+const _logSockets = {};   // job_id → WebSocket
+
+function _w() { return _winHost || { ip: null, port: 8766 }; }
+
+/** 由 refreshTarget() 在配对成功后注入 Windows 主机信息。 */
+function setLogTarget(ip, port) {
+  _winHost = { ip, port: port || 8766 };
+}
+
+/** 切换日志面板可见性 + 按需建 WS 连接。 */
+function toggleTaskLog(taskId) {
+  const box = document.getElementById('log-box-' + taskId);
+  if (!box) return;
+  const willShow = box.hidden;
+  box.hidden = !willShow;
+  if (willShow) connectLogWS(taskId);
+  else disconnectLogWS(taskId);
+}
+
+/** 建立 WS 连接(若尚未连接);连上后自动拉历史 + 实时收新行。 */
+function connectLogWS(taskId) {
+  // ★ 这里拿最新运行中的 job_id(状态 running 的那个),不同 task_id 可能多次触发
+  const js = _latestJobs || [];
+  const running = js.find(j => j.task_id === taskId && (j.state === 'running' || j.state === 'completing'));
+  const jobId = running ? running.job_id : js.find(j => j.task_id === taskId)?.job_id;
+  if (!jobId) {
+    setLogStatus(taskId, 'error没有运行记录');
+    return;
+  }
+  if (_logSockets[taskId] && _logSockets[taskId].readyState <= WebSocket.OPEN) {
+    return;  // 已连接
+  }
+  const { ip, port } = _w();
+  if (!ip) {
+    setLogStatus(taskId, 'error未配对 Windows');
+    logPreInsert(taskId, '⚠ 请先配对 Windows _listener,再查看日志', 'err');
+    return;
+  }
+  // ★ 核心:浏览器直连 Windows listener WebSocket(不经 NAS 中转)
+  const url = `ws://${ip}:${port}/ws/logs/${jobId}`;
+  let ws;
+  try { ws = new WebSocket(url); }
+  catch (e) { setLogStatus(taskId, 'error连接失败: ' + e.message); return; }
+  _logSockets[taskId] = ws;
+  ws.onopen = () => { setLogStatus(taskId, 'connected实时同步中'); clearLogPre(taskId); };
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.error) { logPreInsert(taskId, '⚠ ' + msg.error, 'err'); return; }
+    if (msg.lines && msg.lines.length) msg.lines.forEach(l => logPreInsert(taskId, l, 'line'));
+    if (msg.state) {
+      const s = msg.state.state || msg.state;
+      if (['done','timeout','failed','aborted','completing'].includes(s)) {
+        setLogStatus(taskId, 'connected任务已' + ({done:'完成',timeout:'超时',failed:'失败',aborted:'中止',completing:'收尾'}[s] || s));
+      }
+    }
+    if (msg.last) { setLogStatus(taskId, 'connected已结束'); ws.close(); }
+  };
+  ws.onerror = () => setLogStatusTask(taskId, 'error连接错误');
+  ws.onclose = () => { if (_logSockets[taskId] === ws) delete _logSockets[taskId]; };
+  setLogStatus(taskId, 'connecting连接中...');
+}
+
+function disconnectLogWS(taskId) {
+  const ws = _logSockets[taskId];
+  if (ws) { try { ws.close(); } catch {} delete _logSockets[taskId]; }
+  setLogStatus(taskId, 'idle已断开');
+}
+
+function setLogStatus(taskId, status) {
+  const el = document.getElementById('log-status-' + taskId);
+  if (!el) return;
+  const dot = '<span class="ws-dot ' + status.split(/(?=[A-Z])/)[0] + '"></span>';
+  el.innerHTML = dot + status.replace(/^(connected|error|idle|connecting)\s*/, '');
+  el.className = 'tag task-log-status ' + (status.startsWith('connected') ? 'ok' : status.startsWith('error') ? 'err' : 'idle');
+}
+// 兼容旧签名
+const setLogStatusTask = setLogStatus;
+
+function logPreInsert(taskId, text) {
+  const pre = document.getElementById('log-pre-' + taskId);
+  if (!pre) return;
+  // 仅保留最近 3 行
+  const line = document.createElement('span');
+  line.className = 'log-line';
+  line.textContent = text;
+  pre.appendChild(line);
+  while (pre.children.length > 3) pre.removeChild(pre.firstChild);
+}
+function clearLogPre(taskId) {
+  const pre = document.getElementById('log-pre-' + taskId);
+  if (pre) pre.innerHTML = '';
+}
+let _latestJobs = [];
+// ▲ loadJobs 时使用 _latestJobs 缓存最新 job 列表(供 connectLogWS 找 running job_id)
 
 // 初始化
 setRunStatus('idle', '空闲', '等待任务触发');

@@ -50,6 +50,7 @@ class Job:
     log_lines: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)   # 任务启动时间(Unix time)
     finished_at: float | None = None                       # 进入终态的时间;未完成则为 None
+    log_path: str = ""                                     # BetterGI 日志文件路径(空=不收割)
 
     def to_dict(self) -> dict:
         """序列化为 JSON 友好字典（供 /status 接口返回）。"""

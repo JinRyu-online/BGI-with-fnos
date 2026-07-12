@@ -22,9 +22,21 @@ import time
 from typing import Callable
 
 from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker, make_log_checker
+from bgi_trigger.core.log_harvester import LogHarvester
 from bgi_trigger.core.state import Job, JobStore, JobState
 
 log = logging.getLogger("bgi_trigger.launcher")
+
+# ★ job_id → LogHarvester registry(模块级)。
+# WS 端点通过它找到 job 对应的 harvester,读取日志流。
+_harvesters: dict[str, LogHarvester] = {}
+_harvesters_lock = threading.Lock()
+
+
+def get_harvester(job_id: str) -> LogHarvester | None:
+    """WS 端点使用:按 job_id 查找日志收割器(进行中/刚完成均有)。"""
+    with _harvesters_lock:
+        return _harvesters.get(job_id)
 
 # 收尾动作 → 系统命令映射。
 # sleep   休眠（可被 WOL 唤醒，默认）
@@ -75,6 +87,12 @@ class Launcher:
 
     def __call__(self, job: Job, task) -> None:
         """非阻塞启动：开守护线程执行实际工作。"""
+        # ★ job 已携带 log_path(由 app.py 注入);有则启动 harvester
+        if job.log_path:
+            h = LogHarvester(job_id=job.id, log_path=job.log_path)
+            with _harvesters_lock:
+                _harvesters[job.id] = h
+            h.start()
         t = threading.Thread(target=self._run, args=(job, task), daemon=True)
         t.start()
 
@@ -86,6 +104,22 @@ class Launcher:
             log.exception("job %s failed", job.id)
             self._jobs.mark_completing("error")
             self._jobs.finalize(JobState.FAILED)
+        finally:
+            # ★ 任务结束(任意终态)后停止收割并标记 last=True
+            with _harvesters_lock:
+                h = _harvesters.get(job.id)
+            if h is not None:
+                h.mark_finished()
+                # ★ 保留 harvester 5 分钟给 WS 读完最后日志,然后清理
+                threading.Timer(300.0, lambda: _cleanup_harvester(job.id), daemon=True).start()
+
+
+def _cleanup_harvester(job_id: str) -> None:
+    """延迟清理 harvester(给 WS 留出读完最后日志的时间)。"""
+    with _harvesters_lock:
+        h = _harvesters.pop(job_id, None)
+    if h is not None:
+        h.stop()
 
     def _execute(self, job: Job, task) -> None:
         """实际执行流程（见模块文档）。"""

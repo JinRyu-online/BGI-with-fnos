@@ -24,6 +24,8 @@ exe_path = ""
 config_path = ""
 # BetterGI 日志文件路径。填了才启用完成判定 C（日志关键字）。
 # 留空 -> 完成判定只用 B（游戏进程退出）+ 超时兜底。
+# ★ 支持 glob 模式（按天自动发现）:例如 "C:/Software/BetterGI/log/better-genshin-impact*.log"
+#   省略日期部分,收割器会自动取匹配结果中最新(mtime 最大)的文件。
 log_path = ""
 # 日志中表示调度组执行完成的关键字。需配合 log_path 使用，留空 -> C 禁用。
 log_done_keyword = ""
