@@ -212,7 +212,7 @@ $('btn-scan').onclick = runScan;
 $('btn-scan-subnet').onclick = runScan;
 let selected = null;
 
-// 选择设备：自动拉取 /key 填充配对表单（无需手敲密钥）
+// 选择设备：通过 NAS 后端同源 HTTPS API 拉取 /key，避免浏览器 mixed content 拦截
 async function selectDevice(dev) {
   selected = dev;
   $('pair-form').hidden = false;
@@ -220,11 +220,11 @@ async function selectDevice(dev) {
   $('pair-info').innerHTML = '🔄 正在获取配对信息…';
   $('btn-pair').disabled = true;
   try {
-    const r = await fetch(`http://${dev.ip}:${dev.port}/key`);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data.api_key) {
+    // 关键：走同源后端 /api/discover-key 代理, 不直连 http://Windows:port
+    const data = await api('GET', `/api/discover-key?ip=${encodeURIComponent(dev.ip)}&port=${dev.port}`);
+    if (!data.api_key) {
       $('pair-info').className = 'alert err';
-      $('pair-info').innerHTML = `❌ 无法获取密钥：${data.detail || r.status}`;
+      $('pair-info').innerHTML = `❌ 无法获取密钥：${data.detail || 'no api_key'}`;
       return;
     }
     selected.api_key = data.api_key;

@@ -42,6 +42,8 @@ from tasks import TaskRegistry
 VERSION = "1.0.0"
 # 所有运行时文件均位于本脚本所在目录。
 BASE_DIR = Path(__file__).resolve().parent
+# 确保日志目录存在（pythonw 等无控制台场景依赖文件日志）
+(BASE_DIR / "log").mkdir(exist_ok=True)
 CONFIG_PATH = BASE_DIR / "config.toml"
 TRUSTED_PATH = BASE_DIR / "trusted.json"           # 已信任 IP 持久化
 FIRST_RUN_MARKER = BASE_DIR / ".first_run_done"    # 首次启动标记
@@ -87,6 +89,15 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            # 文件日志（pythonw.exe 无控制台也能落盘，供排查）
+            logging.FileHandler(
+                filename=BASE_DIR / "log" / "listener.log",
+                encoding="utf-8",
+            ),
+            # 控制台日志（有终端时，如 python.exe 开发模式）
+            logging.StreamHandler(),
+        ],
     )
 
     show_key = "--show-key" in sys.argv

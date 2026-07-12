@@ -136,3 +136,41 @@ def test_trigger_network_error_returns_502(tmp_path):
 
     r = c.post("/api/trigger", json={"task_id": "daily"})
     assert r.status_code == 502
+
+
+def test_discover_key_returns_api_key(tmp_path):
+    """GET /api/discover-key 代理目标监听器的 /key，返回 api_key + hostname。"""
+    import respx
+    import httpx as _httpx
+
+    with respx.mock(assert_all_called=True) as mock:
+        mock.get("http://192.168.31.43:8765/key").mock(
+            return_value=_httpx.Response(200, json={"api_key": "abc", "hostname": "H"}))
+        app = _make(tmp_path)
+        c = TestClient(app)
+        r = c.get("/api/discover-key", params={"ip": "192.168.31.43", "port": 8765})
+    assert r.status_code == 200
+    assert r.json()["api_key"] == "abc"
+    assert r.json()["hostname"] == "H"
+
+
+def test_discover_key_missing_ip_400(tmp_path):
+    """缺 ip 返回 400。"""
+    c = TestClient(_make(tmp_path))
+    r = c.get("/api/discover-key")
+    assert r.status_code == 422  # FastAPI Query(...) 必填校验
+
+
+def test_scan_with_explicit_subnet_skips_fallback(tmp_path):
+    """显式 subnet: 只扫该子网，不做 COMMON_SUBNETS 回退。"""
+    calls = []
+
+    def tracking_scanner(subnet, port):
+        calls.append(subnet)
+        return [{"ip": "1.2.3.4", "port": port, "hostname": "X", "version": "1"}]
+
+    c = TestClient(_make(tmp_path, scanner=tracking_scanner))
+    r = c.post("/api/scan", json={"subnet": "1.2.3.0/24", "port": 8765})
+
+    assert r.status_code == 200
+    assert calls == ["1.2.3.0/24"]  # 显式 → 只搜这一网,无 fallback

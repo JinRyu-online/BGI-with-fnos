@@ -21,6 +21,19 @@ from history import HistoryStore, default_history_path
 from listener_client import ListenerAuthError, ListenerClient, ListenerError
 from settings import Settings
 
+
+def _http_get_json(ip: str, port: int, path: str = "/", timeout: float = 3.0) -> dict | None:
+    """内网 HTTP GET 取 JSON，供后端代理接口使用。失败返回 None。"""
+    import httpx
+    try:
+        with httpx.Client(timeout=timeout) as c:
+            r = c.get(f"http://{ip}:{port}{path}")
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        return None
+    return None
+
 # 模板目录位于 app/templates/（容器内 /app/templates）。
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -122,6 +135,7 @@ def create_app(
         """扫描局域网，返回识别为 BetterGI 监听器的设备列表。
 
         请求体可选：{subnet: "192.168.1.0/24", port: 8765}，缺省自动探测子网、用配置端口。
+        自动探测会回退扫描常见家用/办公子网，绝大多数场景无需手填。
         """
         body = body or ScanBody()
         cfg = settings.load()
@@ -129,6 +143,20 @@ def create_app(
         port = body.port or cfg["scan"]["listener_port"]
         devices = scan_fn(subnet, port)
         return {"devices": devices}
+
+    @app.get("/api/discover-key")
+    def api_discover_key(ip: str, port: int = 8765) -> dict:
+        """服务端代理获取目标监听器的 /key。
+
+        前端处于 HTTPS 时浏览器会拦截对 http://IP:port 的 mixed content 请求，
+        故通过同源 HTTPS 后端代理中转。
+        """
+        if not ip:
+            raise HTTPException(status_code=400, detail="missing ip")
+        resp = _http_get_json(ip, port, path="/key", timeout=3.0)
+        if resp is None:
+            raise HTTPException(status_code=502, detail="无法连接监听器或返回无效")
+        return resp
 
     @app.post("/api/pair")
     def api_pair(body: PairBody) -> dict:
