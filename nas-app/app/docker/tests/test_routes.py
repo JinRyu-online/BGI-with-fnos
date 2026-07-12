@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -53,14 +54,43 @@ def _make(tmp_path, *, scanner=None, client=None):
     )
 
 
-def test_scan_returns_devices(tmp_path):
+def test_scan_returns_devices_sync(tmp_path):
+    """同步模式：POST /api/scan {"sync":true} 直接返回设备。"""
     devices = [{"ip": "192.168.1.10", "port": 8765, "hostname": "DESKTOP-A", "version": "1"}]
     client = TestClient(_make(tmp_path, scanner=lambda subnet, port: devices))
 
-    r = client.post("/api/scan")
+    r = client.post("/api/scan", json={"sync": True})
 
     assert r.status_code == 200
     assert r.json()["devices"] == devices
+    assert r.json()["sync"] is True
+
+
+def test_scan_async_started(tmp_path):
+    """异步模式：POST /api/scan 启动后台任务，返回 {"started": True}。"""
+    devices = [{"ip": "192.168.1.10", "port": 8765, "hostname": "A", "version": "1"}]
+
+    def fake_scanner(subnet, port, progress_cb=None):
+        if progress_cb:
+            progress_cb(subnet, devices)
+        return devices
+
+    client = TestClient(_make(tmp_path, scanner=fake_scanner))
+
+    r = client.post("/api/scan")
+    assert r.status_code == 200
+    assert r.json()["started"] is True
+
+    # 等待后台扫描完成
+    for _ in range(50):
+        p = client.get("/api/scan-progress").json()
+        if not p["active"]:
+            break
+        time.sleep(0.05)
+    final = client.get("/api/scan-progress").json()
+    assert final["stage"] == "done"
+    assert len(final["devices"]) == 1
+    assert final["devices"][0]["ip"] == "192.168.1.10"
 
 
 def test_pair_saves_target_and_key(tmp_path):
@@ -170,7 +200,7 @@ def test_scan_with_explicit_subnet_skips_fallback(tmp_path):
         return [{"ip": "1.2.3.4", "port": port, "hostname": "X", "version": "1"}]
 
     c = TestClient(_make(tmp_path, scanner=tracking_scanner))
-    r = c.post("/api/scan", json={"subnet": "1.2.3.0/24", "port": 8765})
+    r = c.post("/api/scan", json={"subnet": "1.2.3.0/24", "port": 8765, "sync": True})
 
     assert r.status_code == 200
     assert calls == ["1.2.3.0/24"]  # 显式 → 只搜这一网,无 fallback

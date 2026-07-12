@@ -108,6 +108,7 @@
     <p class="hint">扫描局域网内的 BetterGI 监听器（首次使用点这里）。自动扫描常见网段，无需手动指定。</p>
     <div class="btn-row">
       <button id="btn-scan" class="primary btn">🔍 自动扫描</button>
+      <button id="btn-cancel" class="outline secondary btn tiny" hidden>⏹ 停止扫描</button>
     </div>
     <details style="margin-top:.75rem;">
       <summary class="hint" style="cursor:pointer;">高级：手动指定子网</summary>
@@ -184,32 +185,123 @@ async function refreshTarget() {
   } catch (e) { $('target-info').innerHTML = `<p class="alert err">读取配置失败：${e.message}</p>`; }
 }
 
-// 扫描（带可选 subnet 覆盖 + 自动 fallback 到常见子网）
+// 扫描模式: 'auto'(plan 给全部,包括 COMMON fallback) / 'subnet'(仅扫指定 CIDR)
+let pollTimer = null;
+
+// 子网状态小卡片
+function renderSubnetRow(s) {
+  const icon = s.status === 'done' ? (s.found ? '✅' : '⬜')
+              : s.status === 'scanning' ? '🔄'
+              : s.status === 'skipped' ? '⏭' : '⏳';
+  const statusTxt = s.status === 'done' ? (s.found ? `发现 ${s.found} 台` : '无设备')
+                  : s.status === 'scanning' ? '扫描中…'
+                  : s.status === 'skipped' ? '跳过' : '等待';
+  return `<div class="subnet-row" style="display:flex;gap:.5rem;align-items:center;padding:.3rem .5rem;border:1px solid #eef0f3;border-radius:6px;margin:.2rem 0;background:#fafbfc;">
+    <span>${icon}</span>
+    <code style="flex:1;font-size:.85rem;">${s.subnet}</code>
+    <span class="hint" style="font-size:.75rem;">${statusTxt}</span>
+  </div>`;
+}
+
+// 进度条 + 子网列表整体渲染
+function renderProgressUI(snap) {
+  const pct = snap.total_ips > 0 ? Math.min(100, Math.round(snap.scanned_ips / snap.total_ips * 100)) : 0;
+  const bar = `<div style="background:#eef0f3;border-radius:99px;height:.6rem;overflow:hidden;margin:.5rem 0;">
+    <div style="background:var(--brand);height:100%;width:${pct}%;transition:width .3s;"></div>
+  </div>`;
+  const stat = `<p class="hint" style="margin:.25rem 0;">已扫 ${snap.scanned}/${snap.total} 个子网 · 约 ${snap.scanned_ips}/${snap.total_ips} IP · 用时 ${snap.elapsed.toFixed(1)}s</p>`;
+  const subnetList = snap.subnets.map(renderSubnetRow).join('');
+  const foundDevices = snap.devices.length
+    ? `<p class="hint" style="margin-top:.5rem;">已发现 <strong>${snap.devices.length}</strong> 台：${snap.devices.map(d=>(`${d.hostname||'?'} (${d.ip})`)).join('、')}</p>`
+    : '';
+  $('scan-result').innerHTML = `${bar}${stat}${subnetList}${foundDevices}`;
+}
+
+// 扫描: 启动后台任务 → 轮询进度 → 完成时渲染可点选的卡片
 async function runScan() {
+  setScanRunning(true);
   $('scan-empty-hint').hidden = true;
   const subnet = $('scan-subnet').value.trim();
-  $('scan-result').innerHTML = '<p class="alert info">扫描中…（可能 10-30 秒，fallback 阶段会稍慢）</p>';
+  // 停止任何旧轮询
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   try {
-    const { devices } = await api('POST', '/api/scan', subnet ? { subnet } : undefined);
-    if (!devices.length) {
-      $('scan-result').innerHTML = '';
-      $('scan-empty-hint').hidden = false;
-      return;
-    }
-    $('scan-result').innerHTML = devices.map(d =>
-      `<div class="device-row">
-         <div class="meta">
-           <div class="name">${d.hostname || '(未知主机)'}</div>
-           <div class="sub">${d.ip}:${d.port} ${d.version ? '· v' + d.version : ''}</div>
-         </div>
-         <button class="outline btn tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
-       </div>`).join('');
-    document.querySelectorAll('#scan-result .device-row button').forEach(b =>
-      b.onclick = () => selectDevice(b.dataset));
-  } catch (e) { $('scan-result').innerHTML = `<p class="alert err">扫描失败：${e.message}</p>`; }
+    const ack = await api('POST', '/api/scan', subnet ? { subnet } : undefined);
+    if (!ack.started) { $('scan-result').innerHTML = `<p class="alert warn">扫描未启动：${ack.reason}</p>`; return; }
+    // 立即显示一次,然后进入轮询
+    const first = await api('GET', '/api/scan-progress');
+    renderProgressUI(first);
+    pollTimer = setInterval(async () => {
+      try {
+        const snap = await api('GET', '/api/scan-progress');
+        if (!snap.active) {
+          clearInterval(pollTimer); pollTimer = null;
+          finishScan(snap);
+          return;
+        }
+        renderProgressUI(snap);
+        // 中途已发现设备,底部实时展示可点选卡
+        if (snap.devices.length) {
+          const devsHtml = `<div style="margin-top:.75rem;">${snap.devices.map(d =>
+            `<div class="device-row">
+              <div class="meta"><div class="name">${d.hostname || '(未知主机)'}</div>
+                <div class="sub">${d.ip}:${d.port} ${d.version ? '· v' + d.version : ''}</div></div>
+              <button class="outline btn tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
+            </div>`).join('')}</div>`;
+          // 仅在进度子网列表后面挂一个临时设备选区
+          const tmp = $('#scan-result .dev-floating');
+          if (tmp) tmp.remove();
+          const el = document.createElement('div');
+          el.className = 'dev-floating';
+          el.innerHTML = `<p class="hint" style="margin-top:.5rem;">⬇ 发现设备(可立即选择)</p>${devsHtml}`;
+          $('scan-result').appendChild(el);
+          el.querySelectorAll('button').forEach(b => b.onclick = () => selectDevice(b.dataset));
+        }
+      } catch (e) { /* 暂略 */ }
+    }, 800);
+  } catch (e) { $('scan-result').innerHTML = `<p class="alert err">启动扫描失败：${e.message}</p>`; }
 }
+
+// 扫描完成后的静态展示
+function finishScan(snap) {
+  setScanRunning(false);                                          // 重置按钮状态
+  if (snap.error) { $('scan-result').innerHTML = `<p class="alert err">扫描出错：${snap.error}</p>`; return; }
+  if (!snap.devices.length) {
+    $('scan-result').innerHTML = '<p class="alert warn">未发现 BetterGI 监听器。</p>';
+    $('scan-empty-hint').hidden = false;
+    return;
+  }
+  $('scan-result').innerHTML = `<p class="hint" style="margin-bottom:.5rem;">扫描完成，用时 ${snap.elapsed.toFixed(1)}s，发现 ${snap.devices.length} 台：</p>`
+    + snap.devices.map(d =>
+      `<div class="device-row">
+        <div class="meta"><div class="name">${d.hostname || '(未知主机)'}</div>
+          <div class="sub">${d.ip}:${d.port} ${d.version ? '· v' + d.version : ''}</div></div>
+        <button class="outline btn tiny" data-ip="${d.ip}" data-port="${d.port}" data-host="${d.hostname||''}">选择</button>
+      </div>`).join('');
+  document.querySelectorAll('#scan-result .device-row button').forEach(b =>
+    b.onclick = () => selectDevice(b.dataset));
+}
+
+// 运行时切换"扫描中"按钮/取消按钮的显隐
+function setScanRunning(running) {
+  $('btn-scan').disabled = running;
+  $('btn-cancel').hidden = !running;
+}
+$('btn-cancel').onclick = async () => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  // 发请求让后端把进度强制置 done(通过再触发一轮无掩码扫描) — 简化:前端直接标记完成
+  const snap = await api('GET', '/api/scan-progress');
+  _progress_user_cancel = true;                                  // 见下文
+  finishScan({ ...snap, active: false, stage: 'done', error: '已取消' });
+};
+
+// 按钮事件绑定
 $('btn-scan').onclick = runScan;
 $('btn-scan-subnet').onclick = runScan;
+$('btn-cancel').onclick = () => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if ($('scan-result')) $('scan-result').innerHTML += '<p class="alert info">已请求停止。</p>';
+  setScanRunning(false);
+};
 let selected = null;
 
 // 选择设备：通过 NAS 后端同源 HTTPS API 拉取 /key，避免浏览器 mixed content 拦截
