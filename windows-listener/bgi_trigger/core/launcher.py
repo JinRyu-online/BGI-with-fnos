@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import sys
 import threading
 import time
 from typing import Callable
@@ -24,6 +26,26 @@ from typing import Callable
 from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker, make_log_checker
 from bgi_trigger.core.log_harvester import LogHarvester
 from bgi_trigger.core.state import Job, JobStore, JobState
+
+# ★ Windows:子进程创建标志。
+# CREATE_NEW_PROCESS_GROUP 让子进程成为新的进程组长,接收 Ctrl+C。
+# CREATE_UNIVERSAL:WINDOWS  + 不继承父进程句柄 → 允许子进程访问
+# 交互式窗口站(Window Station)和桌面,避免计划任务 /RL HIGHEST
+# 下 BetterGI 看不到游戏窗口。
+# 在非 Windows 平台回退到 0。
+if sys.platform == "win32":
+    # CREATE_NEW_PROCESS_GROUP:子进程为新进程组长 + 自带控制台窗口,
+    # 避免继承 pythonw.exe 的无控制台句柄导致 BetterGI 无法看见游戏窗口。
+    _SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP
+else:
+    _SUBPROCESS_CREATION_FLAGS = 0
+
+
+def _default_popen(cmd: list[str], **kwargs) -> subprocess.Popen:
+    """Popen 默认实现:在 Windows 上用 creationflags 让子进程前台可见。"""
+    if sys.platform == "win32":
+        kwargs.setdefault("creationflags", _SUBPROCESS_CREATION_FLAGS)
+    return subprocess.Popen(cmd, **kwargs)
 
 log = logging.getLogger("bgi_trigger.launcher")
 
@@ -73,7 +95,7 @@ class Launcher:
         log_done_keyword: str,
         grace_seconds: int,
         jobs: JobStore,
-        subprocess_runner: Callable = subprocess.Popen,
+        subprocess_runner: Callable | None = None,
         sleep: Callable = time.sleep,
     ) -> None:
         self._exe = bettergi_exe
@@ -82,7 +104,8 @@ class Launcher:
         self._log_keyword = log_done_keyword
         self._grace = grace_seconds
         self._jobs = jobs
-        self._popen = subprocess_runner
+        # ★ 默认用_windows 友好的 Popen(前台可见);测试可注入 fake
+        self._popen = subprocess_runner or _default_popen
         self._sleep = sleep
 
     def __call__(self, job: Job, task) -> None:
