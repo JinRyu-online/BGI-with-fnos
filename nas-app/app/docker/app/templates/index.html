@@ -101,7 +101,13 @@
     .task-title { font-weight:700; font-size:1rem; color:#1e293b; }
     .task-subtitle { font-size:.8rem; color:#64748b; margin-top:.15rem; }
     .task-row { gap:1rem; }
-    .job-row { gap:.75rem; align-items:flex-start; }
+    .job-row { gap:.75rem; align-items:center; }
+    .task-name-badge { display:inline-block; font-size:.82rem; font-weight:600; padding:.3rem .7rem; background:#f8fafc; color:#475569; border:1px solid #e2e8f0; border-radius:8px; font-family:ui-monospace, SFMono-Regular, monospace; }
+    .task-id { display:none; }  /* 不再单独显示 id,已合并进名称气泡 */
+    .job-field { display:flex; gap:.5rem; align-items:center; }
+    .job-field-label { display:inline-block; min-width:4.5rem; font-size:.78rem; color:#64748b; font-weight:500; }
+    .job-field-val { font-size:.85rem; color:#1e293b; font-weight:600; }
+    .job-field-name { color:#1d4ed8; }
     .job-timer { margin-top:.2rem; color:#6b7280; }
   </style>
 </head>
@@ -390,12 +396,9 @@ async function loadTasks() {
     const afterLabel = { sleep: '💤 休眠', shutdown: '⏻ 关机', lock: '🔒 锁屏', none: '⏸ 不操作' };
     $('tasks').innerHTML = tasks.map(t => `
       <div class="task-row">
-        <div class="task-id-col">
-          <span class="prop-pill id">${t.id}</span>
-        </div>
         <div class="meta">
-          <div class="task-title">任务ID：${t.id}</div>
-          <div class="task-subtitle">任务名称：${t.display_name}</div>
+          <div class="task-name-badge">${t.display_name}</div>
+          <div class="task-id">${t.id}</div>
           <div class="groups">${t.groups.map((g,i)=>`<span class="g-step${i===t.groups.length-1?' last':''}">${g}</span>`).join('<span class="g-arrow">→</span>')}</div>
           <div class="task-props">
             <div class="task-prop-row">
@@ -459,7 +462,8 @@ async function loadJobs() {
       return d.toLocaleTimeString('zh-CN', { hour12: false });
     };
     $('jobs').innerHTML = jobs.map(j => {
-      // 优先用 NAS 端记录的 created_at/finished_at;否则回退到 Windows listener 返回的 elapsed
+      // 任务的显示名：优先 NAS 端记录的 display_name(如「挖矿」)，否则用 task_id
+      const displayName = j.display_name || j.task_id;
       const startedAt = j.created_at ? fmtTime(j.created_at) : '–';
       const finishedAt = j.finished_at ? fmtTime(j.finished_at) : (j.state === 'running' ? '进行中' : '–');
       const elapsedSec = (j.created_at && j.finished_at) ? (j.finished_at - j.created_at)
@@ -469,9 +473,9 @@ async function loadJobs() {
       return `<div class="job-row">
         <span class="tag ${j.state}">${stateLabel[j.state] || j.state}</span>
         <div class="meta">
-          <div class="sub"><b>任务ID</b> ${j.task_id}</div>
-          <div class="sub"><b>任务名称</b> ${j.display_name || j.task_id}</div>
-          <div class="sub"><b>运行ID</b> <code>${j.job_id}</code></div>
+          <div class="sub job-field"><span class="job-field-label">任务ID</span><span class="job-field-val">${j.task_id}</span></div>
+          <div class="sub job-field"><span class="job-field-label">任务名称</span><span class="job-field-val job-field-name">${displayName}</span></div>
+          <div class="sub job-field"><span class="job-field-label">运行ID</span><span class="job-field-val_mono"><code>${j.job_id}</code></span></div>
           <div class="sub job-timer">⏱ 用时 <strong>${elapsedTxt}</strong> · 开始 ${startedAt} · 结束 ${finishedAt}</div>
         </div>
       </div>`;
