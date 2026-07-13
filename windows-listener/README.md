@@ -5,14 +5,18 @@
 ## 架构
 
 ```
-config.py     配置加载（TOML + 默认值 + 首启生成密钥）
-tasks.py      任务清单（tasks.json，调度器组名 → 任务）
-auth.py       密钥 + IP 自动学习白名单
-state.py      单槽任务状态机（idle/running/completing/done/timeout/failed/aborted）
-execution.py  完成判定 B（游戏进程）/C（日志关键字）/D（超时）
-launcher.py   拉起 BetterGI + 后台监控 + 收尾动作（sleep/shutdown/lock）
-app.py        FastAPI 五接口
-listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
+service/
+  config.py      配置加载（TOML + 默认值 + 首启生成密钥）
+  auth.py        密钥 + IP 自动学习白名单
+core/
+  state.py       单槽任务状态机（idle/running/completing/done/timeout/failed/aborted）
+  execution.py   完成判定 B（游戏进程）/C（日志关键字）/D（超时）
+  launcher.py    Launcher + _BetterGIExecutor: daemon 线程拉起 BetterGI + 监控 + grace 窗口
+  log_harvester.py LogHarvester: 后台线程收割日志 + WS 实时推送（支持 glob 按天发现）
+  tasks.py       任务清单（tasks.json，调度器组名 → 任务，热加载）
+api/
+  app.py         FastAPI 七接口（含 /ws/logs WebSocket）
+listener.py     入口：装配依赖 + 密钥弹窗 + uvicorn
 ```
 
 ## 接口
@@ -20,10 +24,12 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 | 方法 | 路径 | 鉴权 | 作用 |
 |---|---|---|---|
 | GET | `/health` | 否 | `{"service":"bgi-trigger","hostname":...,"version":...}` 供 NAS 扫描识别 |
+| GET | `/key` | 否 | 返回 `{api_key, hostname}` 供 NAS 自动配对 |
 | GET | `/tasks` | 是 | 返回任务清单 |
 | POST | `/trigger` | 是 | `{"task_id":"daily"}` → `{"job_id":...}`（202），忙时 409 |
 | GET | `/status?job_id=` | 是 | 任务状态 |
 | POST | `/abort` | 是 | 中止当前任务（进入反悔窗口时阻止收尾） |
+| WS | `/ws/logs/{job_id}` | 否 | 实时推送 BetterGI 日志（WebSocket） |
 
 ## 部署
 
@@ -31,10 +37,21 @@ listener.py   入口：装配依赖 + 密钥弹窗 + uvicorn
 2. 以管理员身份运行 `install.ps1`：
    - 建 venv、装依赖；
    - 从 `.example` 生成 `config.toml` 与 `tasks/tasks.json`；
-   - 注册计划任务 `BGI-Trigger-Listener`（登录后自启 + 最高权限 + 失败重启）。
+   - 注册计划任务 `BGI-Trigger-Listener`（登录后自启 + 最高权限，`pythonw.exe` 无控制台窗口）。
 3. 编辑 `config.toml`：填 `bettergi.exe_path`（BetterGI.exe 路径）；`log_path`/`log_done_keyword` 留空则完成判定只用 B+超时。
 4. 编辑 `tasks/tasks.json`：`groups` 须与 BetterGI「全自动-调度器」里的组名一致。
-5. 首次启动会弹窗显示 API 密钥（复制到 NAS 应用）；之后想再看：`venv\Scripts\pythonw.exe listener.py --show-key`。
+5. 首次启动会弹窗显示 API 密钥（复制到 NAS 应用）；之后想再看：`python listener.py --show-key`。
+
+### 开机自启
+
+两种二选一（也可并存）：
+
+| 方式 | 任务名 | 窗口 | 权限 | 适用 |
+|---|---|---|---|---|
+| `install.ps1`（管理员） | `BGI-Trigger-Listener` | 无（pythonw） | `/RL HIGHEST` | 日常使用（后台静默） |
+| `enable_autostart.ps1` | `BGI-Trigger-Listener-Console` | 有（PowerShell 控制台可见） | 默认 `/RL LIMITED`，需管理员时改脚本 `$RL="HIGHEST"` | 调试/排查 |
+
+> **为什么有两个？** `install.ps1` 用 `pythonw.exe` 在后台静默运行（无窗口）。`enable_autostart.ps1` 用 `start_listener.ps1` 带一个可见控制台窗口，方便排查启动问题（端口占用、日志）。`-Console` 任务默认 `/RL LIMITED` 不弹 UAC；如发现 BetterGI 无法启动/聚焦游戏，把 `enable_autostart.ps1` 里的 `$RL` 改成 `"HIGHEST"` 并重跑。
 
 ## 任务清单与热加载
 
@@ -130,8 +147,15 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 ## 开发
 
 ```bash
-python -m pytest tests/ -q          # 54 个单测
-python listener.py                  # 本地启动（开发）
+python -m pytest tests/ -q          # 69 个单测
+python listener.py                  # 本地启动（开发，有控制台窗口）
+pythonw.exe listener.py             # 无控制台窗口（模拟计划任务环境）
+python listener.py --show-key       # 重新弹出密钥窗口
 ```
 
-完成判定逻辑用可注入谓词单测覆盖；HTTP 层用 FastAPI TestClient 覆盖；`tests/test_smoke_wiring.py` 用真实 `.example` 文件做端到端装配校验。
+关键测试覆盖：完成判定逻辑（可注入谓词）、HTTP 层（FastAPI TestClient）、真实配置装配（`tests/test_smoke_wiring.py`）。测试总数 69 个。
+
+### 已知陷阱
+
+- **`.ps1` 文件必须保存为 UTF-8 with BOM**（PowerShell 5.1 在无 BOM 时按系统 ANSI/GBK 读取，UTF-8 中文会被误解析成 `$变量` 插值语法，脚本直接解析失败）。VS Code 右下角可切换「Save with Encoding → UTF-8 with BOM」。
+- **`log_path` 支持 glob**：填如 `C:/Software/BetterGI/log/better-genshin-impact*.log` 会自动按 mtime 取最新一份。

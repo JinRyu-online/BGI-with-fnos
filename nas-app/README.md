@@ -54,15 +54,17 @@ nas-app/
 
 ## 范围
 
-- **M2** 骨架：配置持久化 + 首页 + /health + 打包文件
-- **M3** 设备扫描配对：子网探测 + /health 识别 + 密钥配对
-- **M4** 触发回报：/trigger + 10s 轮询 /status + 历史（**MVP 完成**）
+- **M2** 骨架：配置持久化 + 首页 + /health + 打包文件 ✅
+- **M3** 设备扫描配对：子网探测 + /health/`/key` 识别 + 密钥配对 ✅
+- **M4** 触发回报：/trigger + 10s 轮询 /status + 历史 + WS 实时日志（**MVP 完成**） ✅
+
+> v0.2.0：M1–M4 端到端真机跑通。
 
 ## 本地开发/测试
 
 ```bash
 cd nas-app/app/docker
-python -m pytest tests/ -q          # 单测
+python -m pytest tests/ -q          # 38 个单测
 
 # 不走 Docker，直接跑 FastAPI 验证
 cd app

@@ -11,6 +11,7 @@ windows-listener/tasks/tasks.json
 windows-listener/trusted.json
 windows-listener/.first_run_done
 windows-listener/var/
+windows-listener/log/
 
 # NAS FPK 应用构建产物
 nas-app/**/*.fpk
