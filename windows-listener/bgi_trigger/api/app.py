@@ -40,6 +40,7 @@ class AppDeps:
     auth: AuthState
     jobs: JobStore
     launch: Callable[[Job, Task], None]  # 启动回调：非阻塞，实际工作在守护线程
+    log_path: str = ""  # BetterGI 日志路径（空=不收割，WS 无日志流）
 
     @property
     def api_key(self) -> str:
@@ -115,9 +116,7 @@ def create_app(deps: AppDeps) -> FastAPI:
             log.warning("trigger refused: slot busy for task_id=%s from %s", body.task_id, client_ip)
             raise HTTPException(status_code=409, detail="a job is already running")
         # ★ 注入 BetterGI 日志路径:有日志才启动收割器供 WS 推流
-        # 用 getattr 安全访问:测试用 AppDeps 可能不含 bettergi 字段
-        cfg = getattr(deps, "bettergi", None)
-        job.log_path = cfg.log_path if cfg and cfg.log_path else ""
+        job.log_path = deps.log_path
         log.info("job %s log_path=%s", job.id, job.log_path or "(none)")
         deps.launch(job, task)  # 非阻塞：守护线程内执行
         log.info("trigger accepted: job=%s task=%s groups=%s", job.id, task.id, task.groups)

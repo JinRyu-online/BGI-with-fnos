@@ -78,7 +78,6 @@ class LogHarvester:
         # ★ 异步桥:把同步收割线程的"新行到达"通知迁移到 asyncio event loop
         self._loop: asyncio.AbstractEventLoop | None = None
         self._async_new = asyncio.Event()     # run_coroutine_threadsafe 触发
-        self._follow_pos: int = 0             # 文件读取位置(字节)
         self._finished: bool = False          # 任务是否已结束
 
     def _glob(self) -> Path:
@@ -137,19 +136,25 @@ class LogHarvester:
             with open(self._path, "r", encoding="utf-8", errors="replace") as f:
                 # ★ 从文件末尾开始(不收割启动前的历史)
                 f.seek(0, os.SEEK_END)
-                self._follow_pos = f.tell()
 
+                # 行级收割:保留上一个 chunk 末尾未换行的残行,避免跨块切断
+                pending = ""
                 while not self._stop_evt.is_set():
                     chunk = f.read(64 * 1024)
                     if chunk:
-                        self._follow_pos += len(chunk.encode("utf-8", errors="replace"))
-                        # splitlines 保留换行符细节,但去掉末尾空串
-                        new_lines = [ln for ln in chunk.splitlines() if ln.strip()]
+                        chunk = pending + chunk
+                        lines = chunk.splitlines()
+                        # 最后一段若无换行符,属于未完成的行,留到下个 chunk
+                        if lines and not chunk.endswith("\n"):
+                            pending = lines.pop()
+                        else:
+                            pending = ""
+                        new_lines = [ln for ln in lines if ln.strip()]
                         if new_lines:
                             with self._lock:
                                 self._buf.extend(new_lines)
                             self._fire_async()
-                    time.sleep(self._poll)
+                    time.sleep(self._poll)   # ★ 在 if 外:无新数据时也 sleep,避免 busy-spin
         except Exception:
             log.exception("harvester read error for job %s", self._job_id)
 

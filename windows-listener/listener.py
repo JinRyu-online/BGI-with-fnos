@@ -133,6 +133,7 @@ def main() -> int:
         auth=auth,
         jobs=jobs,
         launch=launcher,
+        log_path=config.bettergi.log_path,
     )
     app = create_app(deps)
 

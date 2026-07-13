@@ -279,3 +279,23 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 no_job: { value: { detail: "no active job" } }
+
+  /ws/logs/{job_id}:
+    get:
+      tags: [执行]
+      summary: 实时日志流（WebSocket）
+      description: |
+        WebSocket 端点：流式推送 BetterGI 日志。Python `websockets` 库不支持 description 字段，
+        这里仅作文档参考。协议：
+          - 连接后服务端先推一次最近 N 条历史({"ts":..., "lines":[...]})；
+          之后每 0.5s 推一次新日志；
+          - 任务终态后推一次 {"state": <JobStatus>} 并关闭。
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      x-websocket: true
+      responses:
+        '101':
+          description: Switching Protocols

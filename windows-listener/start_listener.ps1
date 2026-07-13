@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     前台启动 BGI listener 服务
@@ -28,7 +28,8 @@ function Test-ListenerRunning {
     foreach ($p in $pids) {
         try {
             $proc = Get-Process -Id $p -ErrorAction Stop
-            if ($proc.ProcessName -ne 'python') { $allPython = $false }
+            # python.exe（前台）和 pythonw.exe（install.ps1 注册的计划任务）都算
+            if ($proc.ProcessName -notin @('python', 'pythonw')) { $allPython = $false }
         } catch { $allPython = $false }
     }
     return @{ Running = $true; AllPython = $allPython; Pids = $pids }
