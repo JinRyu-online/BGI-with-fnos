@@ -68,7 +68,8 @@
     .tag.running { background:#fff3cd; color:#92760b; }
     .tag.completing { background:#d1fae5; color:#065f46; }
     .tag.done { background:#d1fae5; color:#065f46; }
-    .tag.timeout { background:#fef3c7; color:#92400e; }
+    .tag.timed_out { background:#fef3c7; color:#92400e; }
+    .tag.abnormal_exit { background:#fee2e2; color:#991b1b; }
     .tag.failed, .tag.aborted { background:#fee2e2; color:#991b1b; }
     .tag.ok { background:#d1fae5; color:#065f46; }
     .tag.err { background:#fee2e2; color:#991b1b; }
@@ -108,25 +109,37 @@
     .job-field-label { display:inline-block; min-width:4.5rem; font-size:.78rem; color:#64748b; font-weight:500; }
     .job-field-val { font-size:.85rem; color:#1e293b; font-weight:600; }
     .job-field-name { color:#1d4ed8; }
-    .task-log-wrap { margin-top:.5rem; width:100%; }
-    .task-log-toggle { font-size:.75rem; padding:.2rem .5rem !important; }
-    .task-log-box { margin-top:.4rem; background:#0f172a; border-radius:8px; padding:.6rem .8rem; max-height:140px; overflow-y:auto; border:1px solid #1e293b; }
-    .task-log-box[hidden] { display:none; }
-    .task-log-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; font-size:.78rem; color:#94a3b8; }
-    .task-log-pre { margin:0; font-size:.72rem; line-height:1.5; color:#e2e8f0; white-space:pre-wrap; word-break:break-all; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .task-log-pre .muted { color:#64748b; }
-    .task-log-pre .log-line { display:block; padding:.05rem 0; border-bottom:1px solid rgba(255,255,255,.04); }
-    .task-log-status { font-size:.7rem; padding:.15rem .45rem; }
+    /* ---------- 状态卡：实时日志面板(单活 job 专属) ---------- */
+    .live-log { margin-top:1rem; background:#0b1220; border:1px solid #1e293b; border-radius:10px; overflow:hidden; }
+    .live-log-head { display:flex; align-items:center; gap:.6rem; padding:.5rem .8rem; background:#0f172a; border-bottom:1px solid #1e293b; font-size:.78rem; color:#94a3b8; }
+    .live-log-head .job-id { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:#64748b; }
+    .live-log-head .spacer { flex:1; }
+    .live-log-head .count { color:#64748b; }
+    .live-log-pre { margin:0; padding:.55rem .8rem; height:260px; overflow-y:auto; font-size:.74rem; line-height:1.55; color:#cbd5e1; white-space:pre-wrap; word-break:break-all; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; scroll-behavior:smooth; }
+    .live-log-pre .log-line { display:block; padding:.04rem 0; border-bottom:1px solid rgba(255,255,255,.04); }
+    .live-log-pre .log-line.kw { color:#fbbf24; font-weight:600; }            /* 完成关键字 */
+    .live-log-pre .log-line.err { color:#f87171; }                              /* 异常 */
+    .live-log-pre .log-line.sys { color:#22d3ee; }                              /* 系统消息 */
+    .live-log-foot { display:flex; align-items:center; gap:.5rem; padding:.5rem .8rem; background:#0f172a; border-top:1px solid #1e293b; }
+    .live-log-foot .spacer { flex:1; }
+    .live-log-reason { font-size:.78rem; font-weight:600; padding:.2rem .6rem; border-radius:999px; }
+    .live-log-reason.ok { background:#052e16; color:#4ade80; border:1px solid #166534; }
+    .live-log-reason.err { background:#450a0a; color:#fca5a5; border:1px solid #7f1d1d; }
     .ws-dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%; margin-right:.3rem; background:#64748b; }
+    .ws-dot.connecting { background:#eab308; animation:pulse 1s infinite; }
     .ws-dot.connected { background:#22c55e; }
     .ws-dot.error { background:#ef4444; }
+    .ws-dot.closed { background:#64748b; }
+    button.danger { background:#dc2626; border-color:#dc2626; color:#fff; }
+    button.danger:hover { background:#b91c1c; border-color:#b91c1c; }
     .status-card .status-row { display:flex; align-items:center; gap:.8rem; }
     .status-indicator { width:.9rem; height:.9rem; border-radius:50%; background:#cbd5e1; flex-shrink:0; animation:none; }
     .status-indicator.is-idle { background:#cbd5e1; }
     .status-indicator.is-running { background:#f59e0b; animation:pulse 1.5s infinite; }
     .status-indicator.is-completing { background:#3b82f6; animation:pulse 1.5s infinite; }
     .status-indicator.is-done { background:#22c55e; }
-    .status-indicator.is-timeout { background:#f97316; }
+    .status-indicator.is-timed_out { background:#f97316; }
+    .status-indicator.is-abnormal_exit { background:#ef4444; }
     .status-indicator.is-failed, .status-indicator.is-aborted { background:#ef4444; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
     .status-text { display:flex; align-items:baseline; gap:.35rem; flex-wrap:wrap; }
@@ -205,6 +218,23 @@
       </div>
     </div>
     <div id="status-meta" class="status-meta"></div>
+
+    <!-- ★ 实时日志面板:单活 job 专属,运行/收尾时展开 -->
+    <div id="live-log" class="live-log" hidden>
+      <div class="live-log-head">
+        <span class="ws-dot connecting" id="ll-dot"></span>
+        <span id="ll-status">连接中…</span>
+        <span class="job-id" id="ll-jobid"></span>
+        <span class="spacer"></span>
+        <span class="count" id="ll-count">0 行</span>
+      </div>
+      <pre class="live-log-pre" id="ll-pre"><span class="log-line sys">▶ 触发任务后,此处实时显示 BetterGI 日志…</span></pre>
+      <div class="live-log-foot">
+        <span id="ll-reason" class="live-log-reason" hidden></span>
+        <span class="spacer"></span>
+        <button id="btn-abort" class="danger btn tiny" hidden>⏹ 中止(跳过收尾)</button>
+      </div>
+    </div>
   </section>
 
   <!-- ===== 历史卡 ===== -->
@@ -443,23 +473,11 @@ async function loadTasks() {
               <span class="prop-pill after">${afterLabel[t.after_done] || t.after_done}</span>
             </div>
           </div>
-          <div class="task-log-wrap">
-            <button class="outline btn tiny task-log-toggle" data-task="${t.id}">📋 日志</button>
-            <div class="task-log-box" id="log-box-${t.id}" hidden>
-              <div class="task-log-header">
-                <span>BetterGI 实时日志</span>
-                <span class="task-log-status tag idle" id="log-status-${t.id}">等待中</span>
-              </div>
-              <pre class="task-log-pre" id="log-pre-${t.id}"><i class="muted">点击「日志」连接 Windows 监听器...</i></pre>
-            </div>
-          </div>
         </div>
         <button class="primary btn tiny" data-id="${t.id}" title="触发任务">▶ 执行</button>
       </div>`).join('');
     document.querySelectorAll('#tasks .task-row button[data-id]').forEach(b =>
       b.onclick = () => trigger(b.dataset.id));
-    document.querySelectorAll('.task-log-toggle').forEach(b =>
-      b.onclick = () => toggleTaskLog(b.dataset.task));
   } catch (e) { $('tasks').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; $('task-count').textContent = '!'; }
 }
 $('btn-load-tasks').onclick = loadTasks;
@@ -468,9 +486,11 @@ $('btn-load-tasks').onclick = loadTasks;
 pollTimer = null;
 async function trigger(taskId) {
   try {
-    const { job_id } = await api('POST', '/api/trigger', { task_id: taskId });
-    setRunStatus('running', '运行中', '任务已触发');
+    const { job_id, display_name } = await api('POST', '/api/trigger', { task_id: taskId });
+    setRunStatus('running', '运行中', display_name || '任务已触发');
     setJobMeta(`任务ID <code>${job_id}</code> · 启动时间 ${fmtTimeStr(Date.now()/1000)}`);
+    showLiveLog(job_id);
+    connectLogWS(job_id);
     pollStatus(job_id, Date.now());
   } catch (e) { setRunStatus('failed', '失败', e.message); setJobMeta(null); }
 }
@@ -485,6 +505,8 @@ function setRunStatus(kind, text, detail) {
   // 指标点颜色
   const ind = $('status-indicator');
   ind.className = 'status-indicator is-' + kind;
+  // 中止按钮:仅 completing(反悔窗口)露出
+  $('btn-abort').hidden = (kind !== 'completing');
   // 副标题(可选)
   if (detail !== undefined) {
     $('status-detail').textContent = detail ? '  ·  ' + detail : '';
@@ -500,14 +522,15 @@ function pollStatus(jobId, startedMs) {
   pollTimer = setInterval(async () => {
     try {
       const st = await api('GET', '/api/status?job_id=' + jobId);
-      const stateText = { running: '运行中', completing: '收尾中', done: '已完成',
-                          timeout: '超时', failed: '失败', aborted: '已中止' };
-      const stateDetail = st.completion_reason ? `（${st.completion_reason}）` : '';
+      const stateText = { running: '运行中', completing: '收尾中（可中止）', done: '已完成',
+                          timed_out: '超时', abnormal_exit: '游戏异常退出', failed: '失败', aborted: '已中止' };
+      const reasonZh = { game_exited:'游戏退出', log_keyword:'日志关键字命中', timeout:'超时', error:'执行错误', aborted:'用户中止' };
+      const stateDetail = st.completion_reason ? `（${reasonZh[st.completion_reason] || st.completion_reason}）` : '';
       const elapsedSec = startedMs ? Math.floor((Date.now() - startedMs) / 1000) : null;
       const elapsedTxt = elapsedSec != null ? `${elapsedSec}s` : '';
       setRunStatus(st.state, stateText[st.state] || st.state, stateDetail);
       setJobMeta(`任务ID <code>${jobId}</code>${elapsedTxt ? ' · 已运行 ' + elapsedTxt : ''}`);
-      const terminal = ['done','timeout','failed','aborted'].includes(st.state);
+      const terminal = ['done','timed_out','abnormal_exit','failed','aborted'].includes(st.state);
       if (terminal) {
         clearInterval(pollTimer);
         const finalElapsed = startedMs ? ` · 总耗时 ${Math.floor((Date.now()-startedMs)/1000)}s` : '';
@@ -526,7 +549,7 @@ async function loadJobs() {
     _latestJobs = jobs;  // ★ 缓存最新 job 列表,供日志面板连接 WS 时定位 running job_id
     if (!jobs.length) { $('jobs').innerHTML = '<p class="empty">暂无历史</p>'; return; }
     const stateLabel = { running: '运行中', completing: '收尾中', done: '✅ 已完成',
-                         timeout: '⏰ 超时', failed: '❌ 失败', aborted: '🚫 已中止' };
+                         timed_out: '⏰ 超时', abnormal_exit: '💥 游戏异常退出', failed: '❌ 失败', aborted: '🚫 已中止' };
     const fmtDuration = (sec) => {
       sec = Math.max(0, Math.floor(sec || 0));
       const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -563,107 +586,125 @@ async function loadJobs() {
 $('btn-load-jobs').onclick = loadJobs;
 
 // ============================================================
-// ★ Windows 日志实时展示：浏览器直连 Windows listener WS ★
+// ★ 实时日志面板：浏览器直连 Windows listener WS(单活 job) ★
 // ============================================================
 let _winHost = null;      // {ip, port}，由配对信息注入
-const _logSockets = {};   // job_id → WebSocket
+let _liveWs = null;       // 当前 job 的 WebSocket
+let _liveJobId = null;    // 当前 job_id
+let _liveLines = 0;       // 已收行数
+let _scrollPaused = false; // 用户向上滚动时暂停自动跟进
 
 function _w() { return _winHost || { ip: null, port: 8766 }; }
 
-/** 由 refreshTarget() 在配对成功后注入 Windows 主机信息。 */
+/** 配对成功后注入 Windows 主机信息。 */
 function setLogTarget(ip, port) {
   _winHost = { ip, port: port || 8766 };
 }
 
-/** 切换日志面板可见性 + 按需建 WS 连接。 */
-function toggleTaskLog(taskId) {
-  const box = document.getElementById('log-box-' + taskId);
-  if (!box) return;
-  const willShow = box.hidden;
-  box.hidden = !willShow;
-  if (willShow) connectLogWS(taskId);
-  else disconnectLogWS(taskId);
+/** 显示日志面板 + 重置计数。 */
+function showLiveLog(jobId) {
+  _liveJobId = jobId;
+  _liveLines = 0;
+  _scrollPaused = false;
+  $('ll-jobid').textContent = '#' + jobId;
+  $('ll-count').textContent = '0 行';
+  $('ll-reason').hidden = true;
+  $('ll-pre').innerHTML = '';
+  $('live-log').hidden = false;
 }
 
-/** 建立 WS 连接(若尚未连接);连上后自动拉历史 + 实时收新行。 */
-function connectLogWS(taskId) {
-  // ★ 这里拿最新运行中的 job_id(状态 running 的那个),不同 task_id 可能多次触发
-  const js = _latestJobs || [];
-  const running = js.find(j => j.task_id === taskId && (j.state === 'running' || j.state === 'completing'));
-  const jobId = running ? running.job_id : js.find(j => j.task_id === taskId)?.job_id;
-  if (!jobId) {
-    setLogStatus(taskId, 'error没有运行记录');
-    return;
-  }
-  if (_logSockets[taskId] && _logSockets[taskId].readyState <= WebSocket.OPEN) {
-    return;  // 已连接
-  }
-  const { ip, port } = _w();
-  if (!ip) {
-    setLogStatus(taskId, 'error未配对 Windows');
-    logPreInsert(taskId, '⚠ 请先配对 Windows _listener,再查看日志', 'err');
-    return;
-  }
-  // ★ 核心:浏览器直连 Windows listener WebSocket(不经 NAS 中转)
-  const url = `ws://${ip}:${port}/ws/logs/${jobId}`;
-  let ws;
-  try { ws = new WebSocket(url); }
-  catch (e) { setLogStatus(taskId, 'error连接失败: ' + e.message); return; }
-  _logSockets[taskId] = ws;
-  ws.onopen = () => { setLogStatus(taskId, 'connected实时同步中'); clearLogPre(taskId); };
-  ws.onmessage = (ev) => {
-    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-    if (msg.error) { logPreInsert(taskId, '⚠ ' + msg.error, 'err'); return; }
-    if (msg.lines && msg.lines.length) msg.lines.forEach(l => logPreInsert(taskId, l, 'line'));
-    if (msg.state) {
-      const s = msg.state.state || msg.state;
-      if (['done','timeout','failed','aborted','completing'].includes(s)) {
-        setLogStatus(taskId, 'connected任务已' + ({done:'完成',timeout:'超时',failed:'失败',aborted:'中止',completing:'收尾'}[s] || s));
-      }
-    }
-    if (msg.last) { setLogStatus(taskId, 'connected已结束'); ws.close(); }
-  };
-  ws.onerror = () => setLogStatusTask(taskId, 'error连接错误');
-  ws.onclose = () => { if (_logSockets[taskId] === ws) delete _logSockets[taskId]; };
-  setLogStatus(taskId, 'connecting连接中...');
+/** 隐藏日志面板。 */
+function hideLiveLog() {
+  $('live-log').hidden = true;
 }
 
-function disconnectLogWS(taskId) {
-  const ws = _logSockets[taskId];
-  if (ws) { try { ws.close(); } catch {} delete _logSockets[taskId]; }
-  setLogStatus(taskId, 'idle已断开');
+// 用户手动滚底 → 恢复自动跟进
+$('ll-pre').addEventListener('scroll', (e) => {
+  const el = e.target;
+  _scrollPaused = (el.scrollHeight - el.scrollTop - el.clientHeight) > 40;
+});
+
+function setLiveWs(state, text) {
+  const dot = $('ll-dot'); dot.className = 'ws-dot ' + state;
+  $('ll-status').textContent = text;
+}
+function setLiveReason(text, cls) {
+  const el = $('ll-reason');
+  if (!text) { el.hidden = true; return; }
+  el.textContent = text; el.className = 'live-log-reason ' + (cls || '');
+  el.hidden = false;
 }
 
-function setLogStatus(taskId, status) {
-  const el = document.getElementById('log-status-' + taskId);
-  if (!el) return;
-  const dot = '<span class="ws-dot ' + status.split(/(?=[A-Z])/)[0] + '"></span>';
-  el.innerHTML = dot + status.replace(/^(connected|error|idle|connecting)\s*/, '');
-  el.className = 'tag task-log-status ' + (status.startsWith('connected') ? 'ok' : status.startsWith('error') ? 'err' : 'idle');
-}
-// 兼容旧签名
-const setLogStatusTask = setLogStatus;
-
-function logPreInsert(taskId, text) {
-  const pre = document.getElementById('log-pre-' + taskId);
-  if (!pre) return;
-  // 仅保留最近 3 行
+function appendLiveLine(raw) {
+  const pre = $('ll-pre');
   const line = document.createElement('span');
   line.className = 'log-line';
-  line.textContent = text;
+  // 行内高亮:完成关键字 / 异常(不污染,仅着色)
+  const t = raw || '';
+  if (/任务结束/.test(t)) { line.className += ' kw'; line.textContent = '★ ' + t; }
+  else if (/失败|异常|错误|error|exception|闪退|fatal/i.test(t)) { line.className += ' err'; line.textContent = t; }
+  else { line.textContent = t; }
   pre.appendChild(line);
-  while (pre.children.length > 3) pre.removeChild(pre.firstChild);
+  _liveLines++;
+  // 缓冲上限 400 行
+  while (pre.children.length > 400) pre.removeChild(pre.firstChild);
+  $('ll-count').textContent = _liveLines + ' 行';
+  if (!_scrollPaused) pre.scrollTop = pre.scrollHeight;
 }
-function clearLogPre(taskId) {
-  const pre = document.getElementById('log-pre-' + taskId);
-  if (pre) pre.innerHTML = '';
+
+/** 建立 WS 连接(server 先推 recent(3) 历史,再推新行,终态推 {last}+state 后关闭)。 */
+function connectLogWS(jobId) {
+  disconnectLogWS();
+  const { ip, port } = _w();
+  if (!ip) {
+    setLiveWs('error', '未配对');
+    appendLiveLine('⚠ 请先配对 Windows _listener,再查看日志');
+    return;
+  }
+  setLiveWs('connecting', '连接中…');
+  const url = `ws://${ip}:${port}/ws/logs/${jobId}`;
+  let ws;
+  try { ws = new WebSocket(url); } catch (e) { setLiveWs('error', '连接失败'); return; }
+  _liveWs = ws;
+  ws.onopen = () => setLiveWs('connected', '实时同步中');
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.error) { appendLiveLine('⚠ ' + msg.error); return; }
+    if (Array.isArray(msg.lines)) msg.lines.forEach(appendLiveLine);
+    if (msg.state) {
+      const s = msg.state.state || msg.state;
+      const reasonMap = { game_exited:'游戏退出', log_keyword:'日志关键字命中', timeout:'超时', error:'执行错误' };
+      const reasonText = msg.state.completion_reason ? (reasonMap[msg.state.completion_reason] || msg.state.completion_reason) : '';
+      const stateZh = { done:'✅ 已完成', timed_out:'⏰ 超时', abnormal_exit:'💥 游戏异常退出', failed:'❌ 失败', aborted:'🚫 已中止', completing:'收尾中' };
+      if (stateZh[s]) setLiveReason(stateZh[s] + (reasonText ? ' · ' + reasonText : ''), s === 'done' ? 'ok' : 'err');
+    }
+    if (msg.last) { setLiveWs('closed', '已结束'); ws.close(); }
+  };
+  ws.onerror = () => setLiveWs('error', '连接错误');
+  ws.onclose = () => { if (_liveWs === ws) _liveWs = null; };
 }
+
+function disconnectLogWS() {
+  if (_liveWs) { try { _liveWs.close(); } catch {} _liveWs = null; }
+}
+
+/** 中止任务(仅在 completing 反悔窗口有效)。 */
+async function abortJob() {
+  if (!_liveJobId) return;
+  try {
+    const r = await api('POST', '/api/abort');
+    appendLiveLine('[系统] 已发送中止请求' + (r.aborted ? ' ✓' : ''));
+  } catch (e) { appendLiveLine('[系统] 中止失败: ' + e.message); }
+}
+$('btn-abort').onclick = abortJob;
+
 let _latestJobs = [];
-// ▲ loadJobs 时使用 _latestJobs 缓存最新 job 列表(供 connectLogWS 找 running job_id)
+// ▲ loadJobs 时缓存最新 job 列表
 
 // 初始化
 setRunStatus('idle', '空闲', '等待任务触发');
 setJobMeta(null);
+hideLiveLog();
 refreshTarget().then(() => { if ($('btn-unpair').hidden === false) loadTasks(); });
 loadJobs();
 </script>

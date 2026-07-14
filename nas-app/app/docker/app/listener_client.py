@@ -68,6 +68,10 @@ class ListenerClient:
         """GET /status?job_id=，返回任务状态。"""
         return self._call("GET", f"/status?job_id={job_id}")
 
+    def abort(self) -> dict:
+        """POST /abort，中止当前任务（仅在 completing 反悔窗口内有效，无活动任务 409）。"""
+        return self._call("POST", "/abort")
+
 
 def _default_request(method, url, headers=None, json=None, timeout=None):
     """默认传输：用 httpx.Client 发起请求。"""

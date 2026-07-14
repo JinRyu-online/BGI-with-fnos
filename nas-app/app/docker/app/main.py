@@ -420,6 +420,20 @@ def create_app(
         """返回 NAS 端任务历史（最新在前）。"""
         return history.all()
 
+    @app.post("/api/abort")
+    def api_abort() -> dict:
+        """中止当前任务：转发到 Windows 监听器（仅在 completing 反悔窗口内有效）。"""
+        try:
+            client, _ = _client_from_config()
+        except _Unpaired:
+            raise HTTPException(status_code=400, detail="未配对设备，请先扫描配对")
+        try:
+            return client.abort()
+        except ListenerAuthError:
+            raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
+        except ListenerError as e:
+            raise HTTPException(status_code=502, detail=f"中止失败：{e}")
+
     return app
 
 

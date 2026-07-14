@@ -20,6 +20,7 @@ class FakeClient:
         self._raise_auth = raise_auth
         self._raise_network = raise_network
         self._trigger_error = trigger_error
+        self._aborted = False
 
     def health(self):
         return self._health
@@ -41,6 +42,10 @@ class FakeClient:
 
     def status(self, job_id):
         return {"id": job_id, "state": self._status_state, "task_id": "daily"}
+
+    def abort(self):
+        self._aborted = True
+        return {"aborted": True}
 
 
 def _make(tmp_path, *, scanner=None, client=None):
@@ -166,6 +171,26 @@ def test_trigger_network_error_returns_502(tmp_path):
 
     r = c.post("/api/trigger", json={"task_id": "daily"})
     assert r.status_code == 502
+
+
+def test_abort_forwards_to_listener(tmp_path):
+    """POST /api/abort 转发到监听器，返回 {"aborted": True} 并落地历史。"""
+    fake = FakeClient(status_state="completing")
+    app = _make(tmp_path, client=fake)
+    c = TestClient(app)
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+
+    r = c.post("/api/abort")
+    assert r.status_code == 200
+    assert r.json() == {"aborted": True}
+    assert fake._aborted is True  # 确实转发到了客户端 abort()
+
+
+def test_abort_unpaired_returns_400(tmp_path):
+    """未配对时 POST /api/abort 返回 400。"""
+    c = TestClient(_make(tmp_path))
+    r = c.post("/api/abort")
+    assert r.status_code == 400
 
 
 def test_discover_key_returns_api_key(tmp_path):
