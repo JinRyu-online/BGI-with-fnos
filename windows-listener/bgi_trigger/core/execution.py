@@ -29,6 +29,12 @@ log = logging.getLogger("bgi_trigger.execution")
 # 不可配置：作为"有人忘了关"的最后安全网。
 MAX_TASK_DURATION_SEC = 24 * 3600  # 24 小时
 
+# 启动预热期：monitor 启动后，此段时间内不触发 B（游戏进程退出）判定。
+# 目的：给 BetterGI 启动游戏留出拉起启动器→登录→进场景的时间，
+# 避免"游戏还没起来就被误判为 game_exited"。
+# 30s：覆盖从休眠唤醒后冷启动 + BitLocker 加密盘慢速读取的边界场景。
+STARTUP_GRACE_SECONDS = 30
+
 
 def build_command(bettergi_exe: str, groups: list[str]) -> list[str]:
     """构造 BetterGI 启动命令行参数列表。
@@ -54,44 +60,66 @@ class CompletionMonitor:
         log_done_keyword: str,
         jobs: JobStore,
         poll_interval: float = 2.0,
+        startup_grace: float = STARTUP_GRACE_SECONDS,
     ) -> None:
         self._is_game_running = is_game_running
         self._harvester = harvester
         self._log_done_keyword = log_done_keyword
         self._jobs = jobs
         self._poll_interval = poll_interval
+        self._startup_grace = startup_grace
         # C 启用条件：harvester 与 keyword 都非空
         c_enabled = harvester is not None and bool(log_done_keyword)
         # ★ 诊断日志：记录判定器启动时的能力状态
         log.info("CompletionMonitor start: poll_interval=%.1fs, "
+                 "startup_grace=%ds, "
                  "checker_B(game_process)=yes, checker_C(log_keyword)=%s, "
                  "checker_D(24h safety net)=yes, checker_abort=yes",
-                 poll_interval, "yes" if c_enabled else "disabled")
+                 poll_interval, self._startup_grace,
+                 "yes" if c_enabled else "disabled")
 
     def wait(self, timeout_sec: float = MAX_TASK_DURATION_SEC) -> str:
         """阻塞等待完成，返回原因："log_keyword" / "game_exited" / "aborted" / "timeout"。
 
         timeout_sec 默认 24h 硬编码兜底；调用方可传更小值用于单测模拟。
+
+        启动后首 self._startup_grace 秒内，B（游戏进程退出）判定被抑制，
+        避免"游戏还没起来就被误判异常退出"。
         """
         deadline = time.monotonic() + timeout_sec
         poll_count = 0
+        # ★ 启动预热期起点。
+        # 注意：不能在循环外"提前判定 in_startup_grace"，否则当 startup_grace=0 时
+        # 可能出现时序竞争：首次 poll 时 time.monotonic() == deadline，
+        # 两者比较结果不稳定导致 in_startup_grace 无法归 False。
+        # 故每次 poll 都重新计算 in_startup_grace。
+        startup_grace_deadline = time.monotonic() + self._startup_grace
         while True:
             poll_count += 1
             remaining = deadline - time.monotonic()
+            # 当前是否处于启动预热期（每次 poll 都重新判定）
+            in_startup_grace = time.monotonic() < startup_grace_deadline
 
-            # 0. 响应外部 abort（★ 新增）
+            # 0. 响应外部 abort
             if self._jobs.abort_requested():
                 log.info("completion interrupted [A:aborted] at poll #%d "
                          "(%.1fs remaining): abort signal detected, "
                          "stopping monitor", poll_count, remaining)
                 return "aborted"
 
-            # B：游戏进程退出
+            # B：游戏进程退出（★ 启动预热期内抑制）
             if not self._is_game_running():
-                log.info("completion detected [B:game_exited] at poll #%d "
-                         "(%.1fs remaining): game_process not found, "
-                         "stopping monitor", poll_count, remaining)
-                return "game_exited"
+                if in_startup_grace:
+                    # 预热期内：仅打 DEBUG，不触发 game_exited
+                    log.debug("poll #%d: game_process not found but still in "
+                              "startup grace period (%.1fs left), ignoring",
+                              poll_count,
+                              startup_grace_deadline - time.monotonic())
+                else:
+                    log.info("completion detected [B:game_exited] at poll #%d "
+                             "(%.1fs remaining): game_process not found, "
+                             "stopping monitor", poll_count, remaining)
+                    return "game_exited"
 
             # C：日志关键字命中（仅 harvester 与 keyword 都非空时启用）
             if self._harvester is not None and self._log_done_keyword:

@@ -72,6 +72,21 @@ _AFTER_DONE_COMMANDS = {
 }
 
 
+def _job_log_save_path(job_id: str) -> Path | None:
+    """计算 job 对应的全量日志落盘路径。
+
+    ★ 落地位置：windows-listener/log/{job_id}.log
+    与 listener 自己的运行时日志同目录，便于统一归档与清理。
+    （不放在 BetterGI 日志目录，避免污染 BetterGI 自带日志）
+    """
+    try:
+        # 延迟导入：listener.py 定义了 BASE_DIR；launcher 启动时必然已有
+        from listener import BASE_DIR
+        return BASE_DIR / "log" / f"{job_id}.log"
+    except Exception:
+        return None
+
+
 def after_done_command(action: str) -> list[str] | None:
     """将收尾动作名转为系统命令列表。none 返回 None，未知动作抛 ValueError。"""
     if action == "none":
@@ -113,7 +128,8 @@ class Launcher:
         """非阻塞启动：开守护线程执行实际工作。"""
         # ★ job 已携带 log_path(由 app.py 注入);有则启动 harvester
         if job.log_path:
-            h = LogHarvester(job_id=job.id, log_path=job.log_path)
+            h = LogHarvester(job_id=job.id, log_path=job.log_path,
+                             save_path=_job_log_save_path(job.id))
             with _harvesters_lock:
                 _harvesters[job.id] = h
             h.start()

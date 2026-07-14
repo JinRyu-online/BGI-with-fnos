@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -186,7 +187,10 @@ def test_ws_logs_unknown_job_id_format_rejected():
 
 def test_harvester_creates_and_buffers_lines():
     """v0.2.0: LogHarvester 行级收割——跨块切割的日志行应完整保留。
-    收割器从文件末尾开始读,故先启动收割器(空文件),再写入内容。"""
+    收割器从文件末尾开始读。
+    ★ 测试策略：分 3 次写，每次写后等待 > poll_interval(0.5s)，
+    确保 harvester 睡眠期间数据已落盘、下一次 poll 必收割到。
+    规避单大 chunk 一次性写入时 chunk 边界切割的 flaky 问题。"""
     import time
 
     tmp_dir = Path(tempfile.mkdtemp())
@@ -196,20 +200,67 @@ def test_harvester_creates_and_buffers_lines():
     h = LogHarvester(job_id="a" * 12, log_path=str(tmp_log))
     h.start()
     try:
-        # 写入跨 64KB 边界的内容:一条长行 + 短行
-        # (harvester 线程在 _run 里等文件出现(空文件已存在即符合),随即开始收割)
+        # ★ 等待 harvester 进入主循环（seek 完成，正在睡等下一 poll）。
+        # 此后写 padding → harvester 醒来收割 → 第一次 poll 必收。
+        assert h.wait_for_ready(timeout=5), "harvester 未在 5s 内就绪"
+
+        # 第 1 段：填充 ~64KB 的padding，跨越第一个 chunk 边界
+        padding = "p" * 65000
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write(f"[padding] {padding}\n")
+        time.sleep(0.7)   # > poll_interval，确保收割完成
+
+        # 第 2 段：长行(~100K)
         long_line = "x" * 100000
         with open(tmp_log, "a", encoding="utf-8") as f:
-            f.write(f"[start] {long_line}\n[short] hello\n")
+            f.write(f"[start] {long_line}\n")
+        time.sleep(0.7)
 
-        # 等待收割完成
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and len(h.recent(10)) < 2:
-            time.sleep(0.1)
+        # 第 3 段：短行
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[short] hello\n")
+        time.sleep(0.7)
+
+        # 收割到的行应包含完整的长行与短行
         buf = h.recent(10)
-        # 关键:跨块的长行应作为完整一行保留(行数 == 2,不是被切成多行)
-        assert len(buf) == 2, f"行级收割应保留完整长行, got {len(buf)} lines"
-        assert buf[0].startswith("[start]")
-        assert buf[1].strip() == "[short] hello"
+        assert len(buf) == 3, f"应收割到 3 行(padding+长+短), got {len(buf)}"
+        assert buf[0].startswith("[padding]")
+        # ★ 关键:跨块的长行应作为完整一行保留
+        assert buf[1].startswith("[start]") and len(buf[1]) >= 100000
+        assert buf[2].strip() == "[short] hello"
     finally:
         h.stop()
+
+
+def test_harvester_save_path_writes_all_lines():
+    """★ 新增：save_path 全部收割行落盘，只包含收割后的行（从末尾读语义）。"""
+    import time
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    src = tmp_dir / "bgi.log"
+    src.write_text("[old] before start\n", encoding="utf-8")  # 收割器启动前的旧行
+    save = tmp_dir / "jobXYZ.log"
+
+    h = LogHarvester(job_id="jobXYZ", log_path=str(src), save_path=str(save))
+    h.start()
+    try:
+        # ★ 等 harvester 进入主循环后再写新行
+        assert h.wait_for_ready(timeout=5), "harvester 未在 5s 内就绪"
+        time.sleep(0.4)
+        with open(src, "a", encoding="utf-8") as f:
+            f.write("[new] line A\n[new] line B\n[new] keyword_match\n")
+        # 等收割
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not h.check_keyword("keyword_match")[0]:
+            time.sleep(0.1)
+    finally:
+        h.stop()
+
+    assert save.exists(), "save_path 应被创建于 jobXYZ.log"
+    saved = save.read_text(encoding="utf-8")
+    # 收割到的行都在
+    assert "[new] line A" in saved
+    assert "[new] line B" in saved
+    assert "[new] keyword_match" in saved
+    # 收割器启动前的旧行不在（从末尾读语义）
+    assert "[old] before start" not in saved

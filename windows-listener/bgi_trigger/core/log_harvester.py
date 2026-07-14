@@ -38,6 +38,10 @@ class LogHarvester:
         recent = h.recent(n=3)          # 取最近 n 条
         await h.wait_new(timeout=30)    # 异步等新行到达
         h.stop()                        # 任务完成后停止收割
+
+    save_path (★ 新参数,可选): 收割到的日志行同步写入的全量文件路径。
+        用于事后排查：把 WS 收錄到的所有行都落盘保留,文件名通常为
+        {bettergi日志目录}/{job_id}.log。None 表示不落盘(默认)。
     """
 
     def __init__(
@@ -46,6 +50,7 @@ class LogHarvester:
         log_path: str | os.PathLike,
         max_lines: int = _DEFAULT_MAX_LINES,
         poll_interval: float = _POLL_INTERVAL_SEC,
+        save_path: str | os.PathLike | None = None,
     ) -> None:
         """
         log_path 支持两种形态:
@@ -74,11 +79,16 @@ class LogHarvester:
         self._buf: Deque[str] = deque(maxlen=max_lines)   # 最近 N 行原始文本
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
+        self._ready_evt = threading.Event()   # ★ 新增:进入主收割后置位,供测试同步
 
         # ★ 异步桥:把同步收割线程的"新行到达"通知迁移到 asyncio event loop
         self._loop: asyncio.AbstractEventLoop | None = None
         self._async_new = asyncio.Event()     # run_coroutine_threadsafe 触发
         self._finished: bool = False          # 任务是否已结束
+
+        # ★ 新:全量日志落盘
+        self._save_path: Path | None = Path(save_path) if save_path else None
+        self._save_file = None                # 懶加载：首次有数据时打开
 
     def _glob(self) -> Path:
         return Path(self._glob_pattern)
@@ -110,6 +120,21 @@ class LogHarvester:
         with self._lock:
             return list(self._buf)[-n:]
 
+    def wait_for_lines(self, min_count: int = 1, timeout: float = 5.0) -> list[str]:
+        """阻塞直到收割到至少 min_count 行（同步，阻塞调用线程）。
+
+        用于测试/集成场景，避免 sleep 硬编码时序：
+        每隔 self._poll 秒检查缓冲条数，超时返回当前已收割的行。
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            buf = self.recent(min_count)
+            if len(buf) >= min_count:
+                return buf
+            if time.monotonic() >= deadline:
+                return buf
+            time.sleep(self._poll)
+
     def check_keyword(self, keyword: str) -> tuple[bool, str]:
         """在 recent 缓冲里做 keyword 子串匹配（从新往旧）。
 
@@ -133,8 +158,33 @@ class LogHarvester:
         self._finished = True
         self._fire_async()
 
+    def wait_for_ready(self, timeout: float = 5.0) -> bool:
+        """阻塞等到后台收割线程进入主循环（seek 完成,开始首轮 poll）。
+        用于测试/集成场景同步,避免启动时序竞争：
+        测试写入前 wait_for_ready() → harvester 正在 sleep 等下一 poll →
+        写入的数据必然被下一 poll 收割到。"""
+        return self._ready_evt.wait(timeout=timeout)
+
+    def _append_to_savefile(self, lines: list[str]) -> None:
+        """把收割到的行同步写到 save_path（懶加载文件句柄,append 模式）。"""
+        if self._save_path is None or not lines:
+            return
+        try:
+            if self._save_file is None:
+                # ★ 首次有数据：打开文件（append + line buffered），顺便建目录
+                self._save_path.parent.mkdir(parents=True, exist_ok=True)
+                self._save_file = open(self._save_path, "a", encoding="utf-8",
+                                       buffering=1)   # line buffered
+                log.info("harvester for job %s: logging to %s",
+                         self.job_id, self._save_path)
+            for ln in lines:
+                self._save_file.write(ln + "\n")
+        except Exception:
+            log.warning("harvester for job %s: failed to write savefile %s",
+                        self.job_id, self._save_path, exc_info=True)
+
     def _run(self) -> None:
-        """后台线程入口:轮询文件 → 读取新行 → 更新 buffer → 通知等待者。"""
+        """后台线程入口:轮询文件 → 读取新行 → 更新 buffer → 通知等待者 → 落盘。"""
         # 等待日志文件首次出现(BetterGI 启动后可能需几百毫秒产生)
         deadline = time.monotonic() + 10.0
         while not self._stop_evt.is_set() and time.monotonic() < deadline:
@@ -150,6 +200,8 @@ class LogHarvester:
             with open(self._path, "r", encoding="utf-8", errors="replace") as f:
                 # ★ 从文件末尾开始(不收割启动前的历史)
                 f.seek(0, os.SEEK_END)
+                # ★ 进入主循环：置位 ready（写入位置 = harvester 正在 sleep 等下一 poll）
+                self._ready_evt.set()
 
                 # 行级收割:保留上一个 chunk 末尾未换行的残行,避免跨块切断
                 pending = ""
@@ -168,9 +220,18 @@ class LogHarvester:
                             with self._lock:
                                 self._buf.extend(new_lines)
                             self._fire_async()
+                            # ★ 新:收割到的行同步落盘
+                            self._append_to_savefile(new_lines)
                     time.sleep(self._poll)   # ★ 在 if 外:无新数据时也 sleep,避免 busy-spin
         except Exception:
             log.exception("harvester read error for job %s", self._job_id)
+        finally:
+            # ★ 收割线程退出时关闭落盘文件
+            if self._save_file is not None:
+                try:
+                    self._save_file.close()
+                except Exception:
+                    pass
 
     def _fire_async(self) -> None:
         """线程安全:把"新行到达"桥接到 asyncio。"""
