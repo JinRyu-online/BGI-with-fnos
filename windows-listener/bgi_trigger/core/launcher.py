@@ -151,7 +151,9 @@ class Launcher:
             if h is not None:
                 h.mark_finished()
                 # ★ 保留 harvester 5 分钟给 WS 读完最后日志,然后清理
-                threading.Timer(300.0, lambda: _cleanup_harvester(job.id), daemon=True).start()
+                t = threading.Timer(300.0, lambda: _cleanup_harvester(job.id))
+                t.daemon = True
+                t.start()
 
 
 def _cleanup_harvester(job_id: str) -> None:
