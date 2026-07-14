@@ -81,15 +81,18 @@ components:
           example: [日常一条龙, 关闭游戏]
         state:
           type: string
-          enum: [running, completing, done, timeout, failed, aborted]
+          enum: [running, completing, done, abnormal_exit, timed_out, failed, aborted]
           example: done
           description: |
             running=执行中；completing=完成判定命中后的 30s 反悔窗口；
-            done/timeout/failed/aborted=终态。
+            done=正常完成（日志关键字命中）；
+            abnormal_exit=游戏进程意外退出（闪退/被杀）；
+            timed_out=24h 硬编码安全兜底超时；
+            failed/aborted=终态。
         completion_reason:
           type: string
           example: game_exited
-          description: 命中原因（game_exited / log_keyword / timeout / error）。
+          description: 命中原因（game_exited / log_keyword / timeout / error / aborted）。
       required: [id, task_id, state]
     Error:
       type: object
@@ -229,7 +232,11 @@ paths:
                 running:
                   value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: running, completion_reason: "" }
                 done:
-                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: done, completion_reason: game_exited }
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: done, completion_reason: log_keyword }
+                abnormal_exit:
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: abnormal_exit, completion_reason: game_exited }
+                timed_out:
+                  value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: timed_out, completion_reason: timeout }
                 failed:
                   value: { id: e4f272964e63, task_id: daily, groups: [日常一条龙, 关闭游戏], state: failed, completion_reason: error }
         '401':

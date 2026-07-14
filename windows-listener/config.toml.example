@@ -17,13 +17,20 @@ api_key = ""
 trusted_ips = []
 
 [bettergi]
+# ★ 配置简化（推荐）：只写一行 dir，其它路径自动推导。
+#   推导规则：exe_path = {dir}/BetterGI.exe ；config_path = {dir}/config ；
+#            log_path  = {dir}/log/better-genshin-impact*.log（glob，按天自动发现）
+#   推导仅当对应字段"未显式配置"时生效：若同时写了 dir 与某个显式字段，以显式字段为准。
+#   示例：dir = "D:/software/BetterGI"
+dir = ""
+# --- 以下为显式字段，留空则使用 dir 的推导值（dir 为空时这些字段必填） ---
 # BetterGI.exe 的完整路径。必填（生产环境）。留空则触发会失败（仅开发调试用）。
 # 示例：exe_path = "D:\\software\\BetterGI\\BetterGI.exe"
 exe_path = ""
 # BetterGI 调度器配置文件路径（可选，用于自动读取组名预填任务）。留空则不自动读取。
 config_path = ""
 # BetterGI 日志文件路径。填了才启用完成判定 C（日志关键字）。
-# 留空 -> 完成判定只用 B（游戏进程退出）+ 超时兜底。
+# 留空 -> 完成判定只用 B（游戏进程退出）+ 24h 超时安全兜底。
 # ★ 支持 glob 模式（按天自动发现）:例如 "C:/Software/BetterGI/log/better-genshin-impact*.log"
 #   省略日期部分,收割器会自动取匹配结果中最新(mtime 最大)的文件。
 log_path = ""

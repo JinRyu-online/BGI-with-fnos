@@ -26,13 +26,15 @@ class JobState(str, Enum):
     RUNNING = "running"
     COMPLETING = "completing"
     DONE = "done"
-    TIMEOUT = "timeout"
+    ABNORMAL_EXIT = "abnormal_exit"   # 游戏进程意外退出（闪退/被杀）
+    TIMED_OUT = "timed_out"           # 24h 硬编码安全兜底超时
     FAILED = "failed"
     ABORTED = "aborted"
 
 
 # 终态集合：处于这些状态时，槽位视为空闲，可接受新任务。
-_TERMINAL = {JobState.DONE, JobState.TIMEOUT, JobState.FAILED, JobState.ABORTED}
+_TERMINAL = {JobState.DONE, JobState.ABNORMAL_EXIT, JobState.TIMED_OUT,
+             JobState.FAILED, JobState.ABORTED}
 
 
 class JobBusy(Exception):

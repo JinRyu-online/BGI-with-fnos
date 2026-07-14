@@ -11,11 +11,14 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger("bgi_trigger.config")
 
 # 默认配置：当 config.toml 中某字段缺失时，用此处的值兜底。
 # 修改默认值需同步更新 config.toml.example，保持一致。
@@ -23,6 +26,12 @@ DEFAULTS: dict = {
     "server": {"host": "0.0.0.0", "port": 8765},
     "auth": {"api_key": "", "trusted_ips": []},
     "bettergi": {
+        "dir": "",               # BetterGI 安装根目录（空=使用下方显式字段）。
+                                    # 非空时 exe_path/config_path/log_path 自动推导：
+                                    #   exe_path  = {dir}/BetterGI.exe
+                                    #   config_path = {dir}/config
+                                    #   log_path  = {dir}/log/better-genshin-impact*.log （glob）
+                                    # 对应字段用户显式配置了，则优先用显式的。
         "exe_path": "",          # BetterGI.exe 路径，留空则启动任务时会失败（开发期可留空）
         "config_path": "",       # BetterGI 调度器配置文件路径，留空则不自动读取组名
         "log_path": "",          # BetterGI 日志路径，留空则禁用完成判定 C
@@ -60,6 +69,7 @@ class Auth:
 @dataclass
 class BetterGI:
     """BetterGI 相关路径与完成判定配置。"""
+    dir: str          # ★ 新增：安装根目录（空=使用显式字段）
     exe_path: str
     config_path: str
     log_path: str
@@ -98,6 +108,9 @@ class ListenerConfig:
 
         若 api_key 为空（首次启动），生成随机密钥并立即回写到磁盘，
         保证下次启动读到的是同一个密钥。
+
+        bettergi.dir 非空且对应字段未显式配置时，自动推导 exe_path /
+        config_path / log_path（log_path 使用 glob 模式按天自动发现）。
         """
         path = Path(path)
         raw = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -106,6 +119,10 @@ class ListenerConfig:
             # 首次启动：生成 16 字节随机数 → 32 位 hex 字符串作为密钥
             merged["auth"]["api_key"] = secrets.token_hex(16)
             _persist_api_key(path, merged)
+
+        # ★ 配置简化：dir 非空时，未显式配置的字段自动推导
+        _derive_bettergi_paths(merged, raw)
+
         return cls(
             server=Server(**merged["server"]),
             auth=Auth(**merged["auth"]),
@@ -114,6 +131,61 @@ class ListenerConfig:
             tasks=Tasks(**merged["tasks"]),
             _path=path,
         )
+
+
+def _derive_bettergi_paths(merged: dict, raw: dict) -> None:
+    """当 bettergi.dir 非空时，自动推导未显式配置的路径字段。
+
+    推导规则（仅当对应字段用户未显式配置时生效）：
+      - exe_path      = {dir}/BetterGI.exe
+      - config_path   = {dir}/config
+      - log_path      = {dir}/log/better-genshin-impact*.log （glob，按天自动发现）
+      - log_done_keyword 不推导（业务特定，必须显式配置）
+
+    显式字段始终优先：用户在 config.toml 写了某个字段 → 用用户的。
+    dir 缺省（空字符串）→ 完全不参与，回退到旧行为。
+
+    路径处理：
+      - 用 Path 拼接（自动处理 / 与 \、尾部分隔符）
+      - 相对路径按 TOML 惯例，相对路径相对于监听器目录，推导前先 resolve 成绝对路径
+      - dir 非空但目录实际不存在：打 WARNING 日志，不阻塞启动
+    """
+    bg = merged.get("bettergi", {})
+    dir_str = bg.get("dir", "")
+    if not dir_str:
+        return  # 旧行为：dir 空，完全不参与
+
+    # 用户显式配置了哪些字段（基于合并前的 raw 判断）
+    raw_bg = raw.get("bettergi", {}) if isinstance(raw, dict) else {}
+    # 默认值集合（用于判断"用户未显式配置"——字段值 == 默认值空字符串）
+    defaults_bg = DEFAULTS.get("bettergi", {})
+
+    try:
+        dir_path = Path(dir_str).expanduser().resolve()
+    except (OSError, RuntimeError) as e:
+        log.warning("bettergi.dir=%r 无法解析为绝对路径: %s", dir_str, e)
+        return
+
+    def _is_unset(field: str) -> bool:
+        """字段用户未显式配置：raw 里没有该键，且默认值也是空字符串。"""
+        if field in raw_bg:
+            return False
+        default_val = defaults_bg.get(field, "")
+        return default_val == "" or default_val is None
+
+    if _is_unset("exe_path"):
+        bg["exe_path"] = str(dir_path / "BetterGI.exe")
+        log.info("bettergi.exe_path derived from dir: %s", bg["exe_path"])
+    if _is_unset("config_path"):
+        bg["config_path"] = str(dir_path / "config")
+        log.info("bettergi.config_path derived from dir: %s", bg["config_path"])
+    if _is_unset("log_path"):
+        bg["log_path"] = str(dir_path / "log" / "better-genshin-impact*.log")
+        log.info("bettergi.log_path derived from dir: %s", bg["log_path"])
+
+    if not dir_path.is_dir():
+        log.warning("bettergi.dir=%s does not exist; task launch will fail until it does",
+                    dir_path)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

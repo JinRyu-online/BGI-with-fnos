@@ -85,14 +85,28 @@ def test_abort_from_completing_to_aborted():
     assert store.history()[0].state == JobState.ABORTED
 
 
-def test_timeout_transitions_running_to_timeout():
+def test_game_exited_transitions_running_to_abnormal_exit():
+    """游戏进程退出 → abnormal_exit（新状态，非 done）。"""
     store = JobStore()
     store.start("daily", ["g"])
 
-    store.mark_completing("timeout")  # timeout also routes through completing
-    store.finalize(JobState.TIMEOUT)
+    store.mark_completing("game_exited")
+    store.finalize(JobState.ABNORMAL_EXIT)
 
-    assert store.current.state == JobState.TIMEOUT
+    assert store.current.state == JobState.ABNORMAL_EXIT
+    assert store.is_idle() is True  # 终态 → 槽位释放
+
+
+def test_timeout_transitions_running_to_timed_out():
+    """24h 安全兜底超时 → timed_out（新状态，非 done）。"""
+    store = JobStore()
+    store.start("daily", ["g"])
+
+    store.mark_completing("timeout")  # timeout still routes through completing
+    store.finalize(JobState.TIMED_OUT)
+
+    assert store.current.state == JobState.TIMED_OUT
+    assert store.is_idle() is True
 
 
 def test_clear_resets_to_idle_without_history_loss():

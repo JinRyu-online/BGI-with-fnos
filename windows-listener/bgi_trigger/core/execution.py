@@ -1,18 +1,33 @@
 """BetterGI 启动与完成判定模块。
 
-完成判定（三者任一触发，先到先得）：
+完成判定（三者优先级递减，先到先得）：
   B - 游戏进程退出（is_game_running() 返回 False）
-  C - BetterGI 日志出现完成关键字（log_done() 返回 True），仅在配置启用时生效
-  D - 超时（在 timeout_sec 内 B/C 均未触发）
+  C - BetterGI 最新日志命中 log_done_keyword（通过注入的 LogHarvester 缓冲查询）
+  D - 24 小时硬编码兜底（任务挂过久无人管）
 
-判定谓词（is_game_running / log_done）以可调用对象注入，使 CompletionMonitor
-可在不依赖真实进程/日志的情况下单元测试。make_game_checker / make_log_checker
-为面向真实环境的谓词工厂。
+此外，每轮检查 abort 信号，命中即返回 "aborted"。
+
+注入资源：
+  - is_game_running: B 谓词
+  - harvester: LogHarvester 实例（None 表示 C 禁用）
+  - log_done_keyword: str（空表示 C 禁用）
+  - jobs: JobStore 实例（用于响应 /abort）
 """
 from __future__ import annotations
 
+import logging
 import time
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:  # 避免运行时循环导入
+    from bgi_trigger.core.log_harvester import LogHarvester
+    from bgi_trigger.core.state import JobStore
+
+log = logging.getLogger("bgi_trigger.execution")
+
+# 任务运行上限（安全兜底）。B/C 之一命中即提前结束；超出此时长强制终结。
+# 不可配置：作为"有人忘了关"的最后安全网。
+MAX_TASK_DURATION_SEC = 24 * 3600  # 24 小时
 
 
 def build_command(bettergi_exe: str, groups: list[str]) -> list[str]:
@@ -25,56 +40,85 @@ def build_command(bettergi_exe: str, groups: list[str]) -> list[str]:
 
 
 class CompletionMonitor:
-    """完成判定监视器：轮询 B/C 谓词，返回首个命中原因或超时。
+    """完成判定监视器：轮询 B/C 谓词，返回首个命中原因。
 
-    每轮检查顺序：先 B（游戏进程退出），再 C（日志关键字），再判超时。
-    因此当同一轮 B、C 同时命中时，B 优先（确定性选择）。
+    每轮检查顺序：先 abort，再 B（游戏进程退出），再 C（日志关键字），再 D（超时）。
+    因此当同一轮多个条件同时命中时，abort > B > C > D（确定性选择）。
     """
 
     def __init__(
         self,
+        *,
         is_game_running: Callable[[], bool],
-        log_done: Callable[[], bool] | None = None,
+        harvester: LogHarvester | None,
+        log_done_keyword: str,
+        jobs: JobStore,
         poll_interval: float = 2.0,
     ) -> None:
         self._is_game_running = is_game_running
-        self._log_done = log_done  # None 表示 C 禁用
+        self._harvester = harvester
+        self._log_done_keyword = log_done_keyword
+        self._jobs = jobs
         self._poll_interval = poll_interval
+        # C 启用条件：harvester 与 keyword 都非空
+        c_enabled = harvester is not None and bool(log_done_keyword)
+        # ★ 诊断日志：记录判定器启动时的能力状态
+        log.info("CompletionMonitor start: poll_interval=%.1fs, "
+                 "checker_B(game_process)=yes, checker_C(log_keyword)=%s, "
+                 "checker_D(24h safety net)=yes, checker_abort=yes",
+                 poll_interval, "yes" if c_enabled else "disabled")
 
-    def wait(self, timeout_sec: float) -> str:
-        """阻塞等待完成，返回原因字符串：game_exited / log_keyword / timeout。"""
+    def wait(self, timeout_sec: float = MAX_TASK_DURATION_SEC) -> str:
+        """阻塞等待完成，返回原因："log_keyword" / "game_exited" / "aborted" / "timeout"。
+
+        timeout_sec 默认 24h 硬编码兜底；调用方可传更小值用于单测模拟。
+        """
         deadline = time.monotonic() + timeout_sec
+        poll_count = 0
         while True:
+            poll_count += 1
+            remaining = deadline - time.monotonic()
+
+            # 0. 响应外部 abort（★ 新增）
+            if self._jobs.abort_requested():
+                log.info("completion interrupted [A:aborted] at poll #%d "
+                         "(%.1fs remaining): abort signal detected, "
+                         "stopping monitor", poll_count, remaining)
+                return "aborted"
+
             # B：游戏进程退出
             if not self._is_game_running():
+                log.info("completion detected [B:game_exited] at poll #%d "
+                         "(%.1fs remaining): game_process not found, "
+                         "stopping monitor", poll_count, remaining)
                 return "game_exited"
-            # C：日志关键字命中（仅启用时检查）
-            if self._log_done is not None and self._log_done():
-                return "log_keyword"
-            # D：超时
+
+            # C：日志关键字命中（仅 harvester 与 keyword 都非空时启用）
+            if self._harvester is not None and self._log_done_keyword:
+                ok, matched_line = self._harvester.check_keyword(self._log_done_keyword)
+                if ok:
+                    # ★ 命中时记录匹配行原文，方便日后排查误命中
+                    log.info("completion detected [C:log_keyword] at poll #%d "
+                             "(%.1fs remaining): keyword=%r matched, line=%r, "
+                             "stopping monitor",
+                             poll_count, remaining, self._log_done_keyword,
+                             matched_line[:200])
+                    return "log_keyword"
+
+            # D：24h 硬编码超时兜底
             if time.monotonic() >= deadline:
+                log.info("completion detected [D:timeout] at poll #%d "
+                         "(%.1fs remaining): timeout_sec=%.0f expired, "
+                         "stopping monitor", poll_count, remaining, timeout_sec)
                 return "timeout"
+
+            # ★ 诊断日志：只在每 30 次轮询（约 60 秒）打一次节拍，
+            #   让"判定还在跑"可观察，又不会刷爆日志
+            if poll_count % 30 == 0:
+                log.debug("completion poll #%d: still waiting (%.0fs remaining), "
+                          "game_running=True", poll_count, remaining)
+
             time.sleep(self._poll_interval)
-
-
-def make_log_checker(log_path: str, keyword: str) -> Callable[[], bool] | None:
-    """构造 C 谓词：当日志文件中出现 keyword 时返回 True。
-
-    path 或 keyword 为空时返回 None（C 禁用）。
-    每次调用读取整个日志文件（日志量不大，简单可靠），文件不可读时返回 False。
-    """
-    if not log_path or not keyword:
-        return None
-    path = log_path
-
-    def _check() -> bool:
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                return keyword in f.read()
-        except OSError:
-            return False
-
-    return _check
 
 
 def make_game_checker(process_names: list[str]):

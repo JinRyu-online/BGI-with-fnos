@@ -110,6 +110,20 @@ class LogHarvester:
         with self._lock:
             return list(self._buf)[-n:]
 
+    def check_keyword(self, keyword: str) -> tuple[bool, str]:
+        """在 recent 缓冲里做 keyword 子串匹配（从新往旧）。
+
+        返回 (是否命中, 匹配行原文)。keyword 为空时返回 (False, "")。
+        复用 self._buf(受 threading.Lock 保护),不再 open 文件。
+        """
+        if not keyword:
+            return False, ""
+        with self._lock:
+            for line in reversed(self._buf):   # 从新往旧找,命中即返回
+                if keyword in line:
+                    return True, line
+        return False, ""
+
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """注册 asyncio event loop,以便 __aiter__ 能 bridge 线程事件。"""
         self._loop = loop

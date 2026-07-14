@@ -5,11 +5,12 @@
 
 执行流程（守护线程内）：
   1. 构造命令行并 Popen BetterGI；
-  2. CompletionMonitor 轮询 B/C，超时上限 = task.timeout_min * 60；
-  3. 命中后 mark_completing（进入 grace 反悔窗口），等待 grace_seconds；
-     期间若被 /abort 置为 aborted，则跳过收尾；
-  4. finalize（done/timeout），清理残留 BetterGI 进程；
-  5. 按 task.after_done 执行收尾（sleep/shutdown/lock/none）。
+  2. CompletionMonitor 轮询 B/C/D(24h 硬编码兜底),命中即返回 reason；
+  3. 命中后 mark_completing(进入 grace 反悔窗口),等待 grace_seconds；
+     期间若被 /abort 置为 aborted,则跳过收尾；
+  4. finalize(根据 reason 映射到 DONE/ABNORMAL_EXIT/TIMED_OUT 终态),
+     清理残留 BetterGI 进程；
+  5. 仅 DONE 时按 task.after_done 执行收尾(sleep/shutdown/lock/none)。
 
 异常时标记 failed，不执行收尾。
 """
@@ -23,7 +24,7 @@ import threading
 import time
 from typing import Callable
 
-from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker, make_log_checker
+from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker
 from bgi_trigger.core.log_harvester import LogHarvester
 from bgi_trigger.core.state import Job, JobStore, JobState
 
@@ -167,25 +168,37 @@ class _BetterGIExecutor:
         log.info("launching BetterGI for job %s: %s", job.id, cmd)
         proc = self._popen(cmd)
 
+        # ★ 取本机已启动的 harvester(由 __call__ 提前创建),注入 monitor
+        with _harvesters_lock:
+            harvester = _harvesters.get(job.id)
         monitor = CompletionMonitor(
             is_game_running=make_game_checker(self._game_processes),
-            log_done=make_log_checker(self._log_path, self._log_keyword),
+            harvester=harvester,                    # None = C 禁用
+            log_done_keyword=self._log_keyword,     # 空 = C 禁用
+            jobs=self._jobs,                        # 用于响应 abort
             poll_interval=2.0,
         )
-        reason = monitor.wait(timeout_sec=task.timeout_min * 60)
+        reason = monitor.wait()   # timeout_sec 默认 24h 硬编码
         log.info("job %s completion reason: %s", job.id, reason)
 
         self._jobs.mark_completing(reason)
+
         # 反悔窗口：期间用户可通过 /abort 中止，跳过收尾。
         # ★ 改用循环 + 检查 abort 信号,确保 abort 后立即退出,不阻塞 _grace 秒。
         deadline = self._grace
         while deadline > 0:
             if self._jobs.abort_requested():
                 log.info("job %s abort requested during grace window; exiting immediately", job.id)
+                # ★ grace 窗口内 abort：尚未 finalize(仍 COMPLETING)，需在此转为 ABORTED
+                if self._jobs.current is job and job.state == JobState.COMPLETING:
+                    self._jobs.finalize(JobState.ABORTED)
+                    log.info("job %s finalized as ABORTED from grace window", job.id)
                 return
             step = min(0.5, deadline)
             self._sleep(step)
             deadline -= step
+        log.info("job %s grace window (%.0fs) expired, proceeding to finalize with reason=%s",
+                 job.id, self._grace, reason)
 
         # 再次取出 current:如果 abort 已清槽位,job 对象已被替换;跳过所有操作。
         if self._jobs.current is not job:
@@ -195,8 +208,25 @@ class _BetterGIExecutor:
             log.info("job %s aborted; skipping after_done", job.id)
             return
 
-        final = JobState.DONE if reason != "timeout" else JobState.TIMEOUT
+        # ★ 新映射：reason → JobState
+        if reason == "log_keyword":
+            final = JobState.DONE
+        elif reason == "game_exited":
+            final = JobState.ABNORMAL_EXIT
+        elif reason == "timeout":
+            final = JobState.TIMED_OUT
+        elif reason == "aborted":
+            final = JobState.ABORTED
+        else:   # "error" 等内部异常
+            final = JobState.FAILED
         self._jobs.finalize(final)
+        log.info("job %s finalized: reason=%s → state=%s", job.id, reason, final.value)
+
+        # ★ 仅正常完成(DONE)执行 after_done；异常/超时/失败/中止 都不动手
+        if final != JobState.DONE:
+            log.info("job %s: final state is %s (not DONE), skipping after_done",
+                     job.id, final.value)
+            return
 
         # 清理可能仍残留的 BetterGI 进程。
         self._terminate(proc)
