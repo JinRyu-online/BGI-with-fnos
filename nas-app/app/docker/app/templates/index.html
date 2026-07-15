@@ -265,11 +265,13 @@ async function refreshTarget() {
     const cfg = await api('GET', '/api/config');
     const t = cfg.default_target;
     if (t) {
+      setLogTarget(t.ip, t.port); // ★ 同步恢复内存中的 WS 目标(页面刷新后 _winHost 丢失)
       $('target-info').innerHTML = `<span class="name">${t.hostname || t.ip}</span><br><span class="sub">${t.ip}:${t.port}</span>`;
       $('target-badge').textContent = '已配对';
       $('target-badge').className = 'tag paired';
       $('btn-unpair').hidden = false;
     } else {
+      setLogTarget(null); // ★ 取消配对时清空 WS 目标
       $('target-info').innerHTML = '<p class="empty">尚未配对，请先“扫描设备”</p>';
       $('target-badge').textContent = '未配对';
       $('target-badge').className = 'tag idle';
@@ -489,6 +491,8 @@ async function trigger(taskId) {
     const { job_id, display_name } = await api('POST', '/api/trigger', { task_id: taskId });
     setRunStatus('running', '运行中', display_name || '任务已触发');
     setJobMeta(`任务ID <code>${job_id}</code> · 启动时间 ${fmtTimeStr(Date.now()/1000)}`);
+    // ★ 触发前确保 _winHost 已就绪(刚刷新页面时内存可能尚未恢复)
+    await ensureWinHost();
     showLiveLog(job_id);
     connectLogWS(job_id);
     pollStatus(job_id, Date.now());
@@ -588,7 +592,7 @@ async function loadJobs() {
 $('btn-load-jobs').onclick = loadJobs;
 
 // 单活 job 恢复:页面刷新/NAS 重启后重建轮询 + WS 日志面板
-function resumeActiveJob(jobs) {
+async function resumeActiveJob(jobs) {
   const live = jobs.find(j => (j.state === 'running' || j.state === 'completing') && !j.finished_at);
   if (!live) return;
   const stateText = { running: '运行中', completing: '收尾中（可中止）' };
@@ -598,6 +602,12 @@ function resumeActiveJob(jobs) {
   setJobMeta(`任务ID <code>${live.job_id}</code> · 恢复监视`);
   // 已连着同一个 job 时不重复连接(避免刷新历史清空缓冲 + 重连闪烁)
   if (_liveJobId === live.job_id && _liveWs && _liveWs.readyState === WebSocket.OPEN) return;
+  // ★ 页面刷新后 _winHost 已从内存丢失:先 await 从后端配置恢复配对信息,再开 WS
+  await ensureWinHost();
+  if (!_w().ip) {
+    appendLiveLine('⚠ 尚未配对 Windows listener,无法同步实时日志(请先「扫描设备」配对)');
+    return;
+  }
   showLiveLog(live.job_id);
   appendLiveLine('[系统] 页面已刷新,恢复实时日志同步…');
   connectLogWS(live.job_id);
@@ -608,6 +618,7 @@ function resumeActiveJob(jobs) {
 // ★ 实时日志面板：浏览器直连 Windows listener WS(单活 job) ★
 // ============================================================
 let _winHost = null;      // {ip, port}，由配对信息注入
+let _winHostPromise = null; // 并发期单次拉取,避免重复请求
 let _liveWs = null;       // 当前 job 的 WebSocket
 let _liveJobId = null;    // 当前 job_id
 let _liveLines = 0;       // 已收行数
@@ -617,7 +628,20 @@ function _w() { return _winHost || { ip: null, port: 8766 }; }
 
 /** 配对成功后注入 Windows 主机信息。 */
 function setLogTarget(ip, port) {
-  _winHost = { ip, port: port || 8766 };
+  if (ip) _winHost = { ip, port: port || 8766 };
+  else _winHost = null;
+}
+
+// 确保 _winHost 已从后端配置恢复(页面刷新/重启后内存丢失,需从 config.json 读回)。
+// 已设置时立即返回;并发调用共享单次请求;失败时清除缓存以便下次重试。
+async function ensureWinHost() {
+  if (_winHost) return _winHost;
+  if (!_winHostPromise) {
+    _winHostPromise = api('GET', '/api/config')
+      .then(cfg => { const t = cfg.default_target; if (t) setLogTarget(t.ip, t.port); return _winHost; })
+      .catch(() => { _winHostPromise = null; return null; });
+  }
+  return _winHostPromise;
 }
 
 /** 显示日志面板 + 重置计数。 */
