@@ -581,9 +581,28 @@ async function loadJobs() {
         </div>
       </div>`;
     }).join('');
+    // ★ 页面刷新后,若有仍在运行/收尾的单活 job,自动恢复轮询 + WS 日志
+    resumeActiveJob(jobs);
   } catch (e) { $('jobs').innerHTML = `<p class="alert err">加载失败：${e.message}</p>`; }
 }
 $('btn-load-jobs').onclick = loadJobs;
+
+// 单活 job 恢复:页面刷新/NAS 重启后重建轮询 + WS 日志面板
+function resumeActiveJob(jobs) {
+  const live = jobs.find(j => (j.state === 'running' || j.state === 'completing') && !j.finished_at);
+  if (!live) return;
+  const stateText = { running: '运行中', completing: '收尾中（可中止）' };
+  setRunStatus(live.state, stateText[live.state] || live.state, live.display_name || '');
+  // 还原真实开始时长(created_at 秒 → 毫秒),避免刷新后计时归零
+  const startedMs = live.created_at ? live.created_at * 1000 : Date.now();
+  setJobMeta(`任务ID <code>${live.job_id}</code> · 恢复监视`);
+  // 已连着同一个 job 时不重复连接(避免刷新历史清空缓冲 + 重连闪烁)
+  if (_liveJobId === live.job_id && _liveWs && _liveWs.readyState === WebSocket.OPEN) return;
+  showLiveLog(live.job_id);
+  appendLiveLine('[系统] 页面已刷新,恢复实时日志同步…');
+  connectLogWS(live.job_id);
+  pollStatus(live.job_id, startedMs);
+}
 
 // ============================================================
 // ★ 实时日志面板：浏览器直连 Windows listener WS(单活 job) ★
