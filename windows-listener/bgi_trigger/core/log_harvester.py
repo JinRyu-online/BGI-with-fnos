@@ -197,8 +197,9 @@ class LogHarvester:
 
     def _run(self) -> None:
         """后台线程入口:轮询文件 → 读取新行 → 更新 buffer → 通知等待者 → 落盘。"""
-        # 等待日志文件首次出现(BetterGI 启动后可能需几百毫秒产生)
-        deadline = time.monotonic() + 10.0
+        # 等待日志文件首次出现(BetterGI 启动→起游戏→加载配置可能需几分钟)。
+        # 5 分钟：覆盖冷启动 + 慢速加密盘 + 长加载链的边界场景。
+        deadline = time.monotonic() + 300.0
         while not self._stop_evt.is_set() and time.monotonic() < deadline:
             if self._path.exists():
                 break
