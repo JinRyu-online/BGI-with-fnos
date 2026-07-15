@@ -64,12 +64,24 @@ class LogHarvester:
         # ★ 路径含通配符 → 改为 glob 匹配
         if any(ch in str(p) for ch in "*?["):
             self._glob_pattern = str(log_path)
-            matches = sorted(self._glob().parent.glob(self._glob().name),
-                             key=lambda f: f.stat().st_mtime, reverse=True)
-            self._path = matches[0] if matches else p
+            matches = list(self._glob().parent.glob(self._glob().name))
+            # 优先取当天文件(文件名含当天日期 YYYYMMDD),而非 mtime 最新的;
+            # 当天尚未生成(BetterGI 还没建文件)时,定位到今天的预期路径,
+            # 让 _run() 等它出现,避免误 tail 昨天残留的日志。
+            today_str = time.strftime("%Y%m%d")
+            today_matches = [m for m in matches if today_str in m.name]
+            if today_matches:
+                self._path = max(today_matches, key=lambda f: f.stat().st_mtime)
+            elif "*" in self._glob().name:
+                # 当天文件尚未生成:定位到今天预期路径,_run() 会等它出现
+                today_name = self._glob().name.replace("*", today_str, 1)
+                self._path = self._glob().parent / today_name
+            else:
+                # 非 * 通配符(?/[])无法推算当天路径,回退到 mtime 最新
+                self._path = max(matches, key=lambda f: f.stat().st_mtime) if matches else p
             if len(matches) > 1:
-                log.info("harvester for job %s: %d matches, chose newest %s",
-                         self.job_id, len(matches), self._path)
+                log.info("harvester for job %s: %d matches, chose today(%s) %s",
+                         self.job_id, len(matches), today_str, self._path)
         else:
             self._path = p
         self._max = max_lines
