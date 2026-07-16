@@ -179,18 +179,33 @@ class _BetterGIExecutor:
         self._jobs = launcher._jobs
         self._popen = launcher._popen
         self._sleep = launcher._sleep
+        # ★ 启动前检测：BetterGI / 游戏是否已在运行（手动启动时也适用）。
+        # 用进程文件名匹配，与 make_game_checker 同一逻辑（psutil 软依赖已延迟导入）。
+        bettergi_name = os.path.basename(self._exe)
+        self._is_bettergi_running = make_game_checker([bettergi_name])
+        self._is_game_running = make_game_checker(self._game_processes)
 
     def execute(self, job: Job, task) -> None:
         """实际执行流程（见模块文档）。"""
-        cmd = build_command(self._exe, task.groups)
-        log.info("launching BetterGI for job %s: %s", job.id, cmd)
-        proc = self._popen(cmd)
+        # ★ 启动前检测：BetterGI 或 游戏 任一已在运行 → 跳过拉起，直接接管监控。
+        # 覆盖场景：用户手动启动的 BetterGI+原神（槽位是空的，单槽保护拦不到），
+        # 此时再 /trigger 不会起第二个实例，而是监听已有实例直到完成。
+        bettergi_running = self._is_bettergi_running()
+        game_running = self._is_game_running()
+        proc: subprocess.Popen | None = None
+        if bettergi_running or game_running:
+            log.info("job %s: already running (BetterGI=%s, game=%s); skip launching, "
+                     "hand off to completion monitor", job.id, bettergi_running, game_running)
+        else:
+            cmd = build_command(self._exe, task.groups)
+            log.info("launching BetterGI for job %s: %s", job.id, cmd)
+            proc = self._popen(cmd)
 
         # ★ 取本机已启动的 harvester(由 __call__ 提前创建),注入 monitor
         with _harvesters_lock:
             harvester = _harvesters.get(job.id)
         monitor = CompletionMonitor(
-            is_game_running=make_game_checker(self._game_processes),
+            is_game_running=self._is_game_running,
             harvester=harvester,                    # None = C 禁用
             log_done_keyword=self._log_keyword,     # 空 = C 禁用
             jobs=self._jobs,                        # 用于响应 abort
@@ -260,7 +275,10 @@ class _BetterGIExecutor:
 
     @staticmethod
     def _terminate(proc) -> None:
-        """若 BetterGI 进程仍在运行，尝试 terminate。"""
+        """若 BetterGI 进程仍在运行，尝试 terminate。
+        proc 为 None 表示本次 job 未拉起新进程（已运行，跳过），无需清理。"""
+        if proc is None:
+            return
         try:
             if proc.poll() is None:
                 proc.terminate()

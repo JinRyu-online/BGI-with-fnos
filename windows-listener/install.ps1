@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     BetterGI Trigger Listener - Windows 安装脚本
@@ -31,9 +31,15 @@ $PYW = Join-Path $venv "Scripts\pythonw.exe"
 $SCRIPT = Join-Path $BASE "listener.py"
 $TASKNAME = "BGI-Trigger-Listener"
 
-# 镜像（清华默认；阿里云/腾讯云可改下面对应行）
-$MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-$TRUSTED = "pypi.tuna.tsinghua.edu.cn"
+# 镜像列表（按优先级）。主源 403 时自动切下一个，避免单点挂掉整个安装。
+# 清华源偶发限流 409/403，故以阿里云为主、清华/腾讯云备选。
+$MIRRORS = @(
+    @{ Url = "https://mirrors.aliyun.com/pypi/simple"; Host = "mirrors.aliyun.com" },
+    @{ Url = "https://pypi.tuna.tsinghua.edu.cn/simple"; Host = "pypi.tuna.tsinghua.edu.cn" },
+    @{ Url = "https://mirrors.cloud.tencent.com/pypi/simple"; Host = "mirrors.cloud.tencent.com" }
+)
+$MIRROR = $MIRRORS[0].Url
+$TRUSTED = $MIRRORS[0].Host
 
 # uv 相关的环境变量
 $env:UV_INDEX_URL = $MIRROR
@@ -48,30 +54,56 @@ if (-not (Test-Path $venv)) {
 }
 
 # ---------- 2. 安装依赖 ----------
-Write-Host "[2/5] 安装依赖（$MIRROR）..." -ForegroundColor Cyan
-Write-Host "      优先用 uv；失败则回退到 pip..." -ForegroundColor Gray
+Write-Host "[2/5] 安装依赖..." -ForegroundColor Cyan
+Write-Host "      镜像链: $($MIRRORS.ForEach({ $_.Url }) -join ' -> ')" -ForegroundColor Gray
 
 $depsInstalled = $false
+$requirements = Join-Path $BASE "requirements.txt"
 
-# 先装 uv 进 venv
-& $PY -m pip install uv -i $MIRROR --trusted-host $TRUSTED 2>$null
-if ($LASTEXITCODE -eq 0) {
-    & $PY -m uv pip install -r (Join-Path $BASE "requirements.txt")
+# ★ 按镜像链逐个尝试：每个镜像先试 uv，失败则回退 pip；仍失败则切下一镜像。
+# 覆盖场景：主源（如清华）偶发限流 403 时自动切到阿里云/腾讯云。
+foreach ($m in $MIRRORS) {
+    $mirrorUrl = $m.Url
+    $mirrorHost = $m.Host
+    Write-Host "      尝试镜像: $mirrorUrl" -ForegroundColor Gray
+
+    # 先装 uv 进 venv（uv 自身也走镜像）
+    & $PY -m pip install uv -i $mirrorUrl --trusted-host $mirrorHost 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $env:UV_INDEX_URL = $mirrorUrl
+        & $PY -m uv pip install -r $requirements
+        if ($LASTEXITCODE -eq 0) {
+            $depsInstalled = $true
+            break
+        }
+        Write-Host "      uv 安装失败，回退 pip..." -ForegroundColor DarkYellow
+    }
+
+    & $PY -m pip install -r $requirements -i $mirrorUrl --trusted-host $mirrorHost
     if ($LASTEXITCODE -eq 0) {
         $depsInstalled = $true
+        break
     }
+    Write-Host "      该镜像失败，切下一个..." -ForegroundColor DarkYellow
 }
 
 if (-not $depsInstalled) {
-    Write-Host "      uv 不可用/失败，回退到 pip 直接安装..." -ForegroundColor DarkYellow
-    & $PY -m pip install -r (Join-Path $BASE "requirements.txt") -i $MIRROR --trusted-host $TRUSTED
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[错误] 依赖安装失败，请检查网络。" -ForegroundColor Red
-        Read-Host "按回车键退出"
-        exit 1
-    }
+    Write-Host "[错误] 所有镜像均失败，请检查网络或临时挂代理。" -ForegroundColor Red
+    Read-Host "按回车键退出"
+    exit 1
 }
 Write-Host "[2/5] 依赖安装完成。" -ForegroundColor Green
+
+# ★ 验证 WebSocket 库已就位（uvicorn[standard] 包含 websockets）。
+# 若缺失，WS 端点会在运行时才以 "Unsupported upgrade request" 爆炸，此处提前拦。
+Write-Host "      验证 WebSocket 库..." -ForegroundColor Gray
+& $PY -c "import websockets; print('      websockets', websockets.__version__)" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[错误] WebSocket 库(websockets)未安装，请重新运行 install.ps1 或手动：" -ForegroundColor Red
+    Write-Host "       pip install \"uvicorn[standard]\"" -ForegroundColor Yellow
+    Read-Host "按回车键退出"
+    exit 1
+}
 
 # ---------- 3. 生成配置文件（从 .example） ----------
 Write-Host "[3/5] 生成配置文件..." -ForegroundColor Cyan
