@@ -27,6 +27,12 @@ from bgi_trigger.core.state import Job, JobStore
 from bgi_trigger.core.tasks import Task, TaskRegistry, TaskNotFound
 from bgi_trigger.core.launcher import get_harvester
 
+# ★ 404 频率抑制:同一 job_id 首次 + 每 5 分钟最多提醒一次。
+# NAS 轮询一个已归档的旧 job_id 是正常时序现象(任务完成 → 清收割器 → 历史超 20 条截掉)，
+# 若每 10 秒轮询都打 WARNING 会刷爆日志。用一个 dict 记"最近一次告警时间"来节流。
+_status_404_log_state: dict[str, float] = {}   # job_id → 上次告警时间(monotonic)
+_STATUS_404_SUPPRESS_SEC = 300.0               # 同一 job_id 5 分钟内不重复告警
+
 SERVICE_NAME = "bgi-trigger"  # NAS 扫描时 /health 返回的服务标识，必须固定
 log = logging.getLogger("bgi_trigger.app")
 
@@ -132,7 +138,22 @@ def create_app(deps: AppDeps) -> FastAPI:
         authenticate(request, authorization)
         job = deps.jobs.get(job_id)
         if job is None:
-            log.warning("status: job_id=%s not found (from %s)", job_id, client_ip)
+            # ★ 频率抑制：仅首次 + 每 5 分钟打一条 INFO（不是 WARNING），
+            # 避免 NAS 轮询已归档的旧 job_id 每 10 秒刷一次 WARNING。
+            now = time.monotonic()
+            last = _status_404_log_state.get(job_id, -1.0)
+            if now - last >= _STATUS_404_SUPPRESS_SEC:
+                _status_404_log_state[job_id] = now
+                # ★ 简易 GC:顺手清掉已超期的条目,避免 dict 无限增长。
+                expired = [k for k, v in _status_404_log_state.items()
+                           if now - v > _STATUS_404_SUPPRESS_SEC]
+                for k in expired:
+                    del _status_404_log_state[k]
+                log.info("status: job_id=%s not found (from %s); "
+                         "suppressing repeats for %.0fs",
+                         job_id, client_ip, _STATUS_404_SUPPRESS_SEC)
+            else:
+                log.debug("status: job_id=%s not found (from %s)", job_id, client_ip)
             raise HTTPException(status_code=404, detail="job not found")
         log.debug("status polled: job=%s state=%s from %s", job_id, job.state.value, client_ip)
         return job.to_dict()
