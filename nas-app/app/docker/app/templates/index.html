@@ -500,7 +500,9 @@ async function trigger(taskId) {
 }
 function fmtTimeStr(ts) {
   const d = new Date((ts || 0) * 1000);
-  return d.toLocaleTimeString('zh-CN', { hour12: false });
+  const pad = (n) => String(n).padStart(2, '0');
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${date} ${d.toLocaleTimeString('zh-CN', { hour12: false })}`;
 }
 function setRunStatus(kind, text, detail) {
   const tag = $('run-status');
@@ -542,7 +544,18 @@ function pollStatus(jobId, startedMs) {
         setJobMeta(`任务ID <code>${jobId}</code>${finalElapsed}`);
         loadJobs();
       }
-    } catch (e) { /* 暂时错误，继续轮询 */ }
+    } catch (e) {
+      // ★ 404 = 任务已不存在(listener 历史仅保留 20 条,旧 job 会被截掉)。
+      // 这不是"暂时错误",继续轮询无意义 —— 停掉并提示,避免无限空转刷屏。
+      const isGone = /404|not found|任务不存在|job not found/i.test(String(e && e.message || ''));
+      if (isGone) {
+        clearInterval(pollTimer); pollTimer = null;
+        appendLiveLine('⚠ 任务 ' + jobId + ' 已结束并被清理,停止状态轮询');
+        setRunStatus('failed', '已结束/已清理', '该任务已从 listener 历史移除,不再轮询');
+        setJobMeta(`任务ID <code>${jobId}</code> (已清理)`);
+      }
+      // 其他错误(网络抖动等):保持轮询,等待恢复
+    }
   }, 10000);
 }
 
@@ -564,7 +577,10 @@ async function loadJobs() {
     const fmtTime = (ts) => {
       if (!ts) return '–';
       const d = new Date(ts * 1000);
-      return d.toLocaleTimeString('zh-CN', { hour12: false });
+      // ★ 日期 + 时间(24h):历史任务跨天时能分辨,不再只有时刻。
+      const pad = (n) => String(n).padStart(2, '0');
+      const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      return `${date} ${d.toLocaleTimeString('zh-CN', { hour12: false })}`;
     };
     $('jobs').innerHTML = jobs.map(j => {
       // 任务的显示名：优先 NAS 端记录的 display_name(如「挖矿」)，否则用 task_id
