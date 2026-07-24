@@ -122,6 +122,9 @@ def main() -> int:
         game_processes=config.bettergi.game_processes,
         log_path=config.bettergi.log_path,
         log_done_keyword=config.bettergi.log_done_keyword,
+        # ★ log_done_mode="count" → required_matches=组数(默认);
+        #   log_done_mode="first" → required_matches=1(旧行为,首次命中即触发)。
+        log_done_mode=getattr(config.bettergi, "log_done_mode", "count"),
         grace_seconds=config.execution.grace_seconds,
         jobs=jobs,
     )

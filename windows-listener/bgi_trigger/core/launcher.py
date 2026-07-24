@@ -111,6 +111,7 @@ class Launcher:
         log_done_keyword: str,
         grace_seconds: int,
         jobs: JobStore,
+        log_done_mode: str = "count",
         subprocess_runner: Callable | None = None,
         sleep: Callable = time.sleep,
     ) -> None:
@@ -118,6 +119,8 @@ class Launcher:
         self._game_processes = game_processes
         self._log_path = log_path
         self._log_keyword = log_done_keyword
+        # ★ "count" → required_matches=组数; "first" → required_matches=1(旧行为)
+        self._log_done_mode = log_done_mode
         self._grace = grace_seconds
         self._jobs = jobs
         # ★ 默认用_windows 友好的 Popen(前台可见);测试可注入 fake
@@ -128,8 +131,18 @@ class Launcher:
         """非阻塞启动：开守护线程执行实际工作。"""
         # ★ job 已携带 log_path(由 app.py 注入);有则启动 harvester
         if job.log_path:
+            # ★ 完成判定 C 的触发阈值:
+            #   count 模式 → required_matches = 组数(每个组结束都打 keyword,
+            #           只有累计命中组数那次=最后一组才触发,避免中间组误触发)。
+            #   first 模式 → required_matches = 1(旧行为,首次命中即触发)。
+            if self._log_done_mode == "first":
+                required = 1
+            else:
+                required = max(1, len(job.groups))
             h = LogHarvester(job_id=job.id, log_path=job.log_path,
-                             save_path=_job_log_save_path(job.id))
+                             save_path=_job_log_save_path(job.id),
+                             required_matches=required)
+            h.set_keyword(self._log_keyword)   # ★ 启用计数模式
             with _harvesters_lock:
                 _harvesters[job.id] = h
             h.start()

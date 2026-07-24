@@ -51,6 +51,7 @@ class LogHarvester:
         max_lines: int = _DEFAULT_MAX_LINES,
         poll_interval: float = _POLL_INTERVAL_SEC,
         save_path: str | os.PathLike | None = None,
+        required_matches: int = 1,
     ) -> None:
         """
         log_path 支持两种形态:
@@ -86,6 +87,10 @@ class LogHarvester:
             self._path = p
         self._max = max_lines
         self._poll = poll_interval
+        # ★ 完成判定 C 的计数触发:keyword 需命中 required_matches 次才算完成。
+        #   多组任务中 BetterGI 每个组结束都打 "任务结束",此时 required_matches=组数,
+        #   只有最后一个组结束才触发完成,避免中间组误触发。
+        self._required_matches = max(1, required_matches)
 
         self._lock = threading.Lock()
         self._buf: Deque[str] = deque(maxlen=max_lines)   # 最近 N 行原始文本
@@ -101,6 +106,11 @@ class LogHarvester:
         # ★ 新:全量日志落盘
         self._save_path: Path | None = Path(save_path) if save_path else None
         self._save_file = None                # 懶加载：首次有数据时打开
+
+        # ★ 完成判定 C 的持久计数状态(在 _run 里累加,check_keyword 里读取)
+        self._log_keyword: str = ""           # 空 = 不计数(外部仍可用 check_keyword 扫缓冲)
+        self._match_count: int = 0            # 已命中 keyword 的次数
+        self._last_matched_line: str = ""     # 上次命中的行(去重 + 诊断用)
 
     def _glob(self) -> Path:
         return Path(self._glob_pattern)
@@ -147,16 +157,37 @@ class LogHarvester:
                 return buf
             time.sleep(self._poll)
 
-    def check_keyword(self, keyword: str) -> tuple[bool, str]:
-        """在 recent 缓冲里做 keyword 子串匹配（从新往旧）。
+    def set_keyword(self, keyword: str) -> None:
+        """设置完成判定 C 的 keyword,并复位计数状态。
 
-        返回 (是否命中, 匹配行原文)。keyword 为空时返回 (False, "")。
-        复用 self._buf(受 threading.Lock 保护),不再 open 文件。
+        计数在 _run 收割线程里累加(每个文件行只过一遍),check_keyword 读取计数。
+        空 keyword → 禁用计数,check_keyword 回退到缓冲扫描(向后兼容)。
+        """
+        with self._lock:
+            self._log_keyword = keyword
+            self._match_count = 0
+            self._last_matched_line = ""
+
+    def check_keyword(self, keyword: str) -> tuple[bool, str]:
+        """判定 keyword 是否命中。
+
+        两种模式(由 set_keyword 是否调用来决定):
+          1) 计数模式: set_keyword(k) 已调用 → 命中次数 >= required_matches 时返回 True。
+             用于多组任务,避免中间组误触发。
+          2) 扫描模式(向后兼容): 未 set_keyword → 在 recent 缓冲里子串匹配,首次命中即 True。
+
+        返回 (是否命中, 匹配行原文)。keyword 空时返回 (False, "")。
         """
         if not keyword:
             return False, ""
         with self._lock:
-            for line in reversed(self._buf):   # 从新往旧找,命中即返回
+            # ★ 计数模式:持久计数 >= 阈值才触发(每个文件行只计一次,不依赖 deque 缓冲)
+            if self._log_keyword:
+                if self._match_count >= self._required_matches:
+                    return True, self._last_matched_line
+                return False, ""
+            # ★ 扫描模式(向后兼容):缓冲里从新往旧找,命中即返回
+            for line in reversed(self._buf):
                 if keyword in line:
                     return True, line
         return False, ""
@@ -232,6 +263,18 @@ class LogHarvester:
                         if new_lines:
                             with self._lock:
                                 self._buf.extend(new_lines)
+                                # ★ 完成判定 C:持久计数 keyword 命中次数(每个文件行只过一遍,
+                                #   不依赖 deque 缓冲,多组任务中间组不会把早期匹配行挤出)
+                                if self._log_keyword:
+                                    for ln in new_lines:
+                                        if self._log_keyword in ln:
+                                            self._match_count += 1
+                                            self._last_matched_line = ln
+                                            log.info("keyword %r match %d/%d: %s",
+                                                     self._log_keyword,
+                                                     self._match_count,
+                                                     self._required_matches,
+                                                     ln[:120])
                             self._fire_async()
                             # ★ 新:收割到的行同步落盘
                             self._append_to_savefile(new_lines)

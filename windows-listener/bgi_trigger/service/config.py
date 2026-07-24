@@ -75,6 +75,9 @@ class BetterGI:
     log_path: str
     log_done_keyword: str
     game_processes: list[str]
+    # ★ "count"=命中组数才触发(默认,多组任务用);"first"=首次命中即触发(单组任务用)。
+    #   放末尾:game_processes 无默认值,dataclass 要求有默认的字段排在后面。
+    log_done_mode: str = "count"
 
 
 @dataclass

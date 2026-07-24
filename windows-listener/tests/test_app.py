@@ -264,3 +264,95 @@ def test_harvester_save_path_writes_all_lines():
     assert "[new] keyword_match" in saved
     # 收割器启动前的旧行不在（从末尾读语义）
     assert "[old] before start" not in saved
+
+
+def test_keyword_count_mode_requires_n_matches():
+    """★ 新增:计数模式——keyword 需命中 required_matches 次才触发完成。
+
+    模拟多组任务:3 个组,每个组结束都打 "任务结束"。
+    前 2 次命中不应触发,第 3 次(最后一组)才触发。
+    """
+    import time
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_log = tmp_dir / "bgi.log"
+    tmp_log.write_text("", encoding="utf-8")
+
+    # required_matches=3(3 个组)
+    h = LogHarvester(job_id="countJob", log_path=str(tmp_log),
+                    required_matches=3, poll_interval=0.1)
+    h.set_keyword("任务结束")   # 启用计数模式
+    h.start()
+    try:
+        assert h.wait_for_ready(timeout=5)
+
+        # 第 1 个组结束
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[10:00:00] 配置组 A\n[10:00:01] → \"任务结束\"\n")
+        time.sleep(0.3)
+        ok, _ = h.check_keyword("任务结束")
+        assert not ok, "第 1 次命中不应触发(3 组任务)"
+
+        # 第 2 个组结束
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[10:01:00] 配置组 B\n[10:01:01] → \"任务结束\"\n")
+        time.sleep(0.3)
+        ok, _ = h.check_keyword("任务结束")
+        assert not ok, "第 2 次命中不应触发(3 组任务)"
+
+        # 第 3 个组结束(最后一组)→ 应触发
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[10:02:00] 配置组 C\n[10:02:01] → \"任务结束\"\n")
+        time.sleep(0.3)
+        ok, line = h.check_keyword("任务结束")
+        assert ok, "第 3 次命中(最后一组)应触发完成"
+        assert "任务结束" in line
+    finally:
+        h.stop()
+
+
+def test_keyword_count_mode_first_match_when_required_is_1():
+    """★ 计数模式 required_matches=1(单组任务)→ 首次命中即触发(向后兼容)。"""
+    import time
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_log = tmp_dir / "bgi.log"
+    tmp_log.write_text("", encoding="utf-8")
+
+    h = LogHarvester(job_id="singleJob", log_path=str(tmp_log),
+                    required_matches=1, poll_interval=0.1)
+    h.set_keyword("任务结束")
+    h.start()
+    try:
+        assert h.wait_for_ready(timeout=5)
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[10:00:01] → \"任务结束\"\n")
+        time.sleep(0.3)
+        ok, _ = h.check_keyword("任务结束")
+        assert ok, "required_matches=1 时首次命中即触发"
+    finally:
+        h.stop()
+
+
+def test_keyword_scan_mode_backward_compat():
+    """★ 未 set_keyword 时回退到缓冲扫描模式(向后兼容):首次命中即触发。"""
+    import time
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_log = tmp_dir / "bgi.log"
+    tmp_log.write_text("", encoding="utf-8")
+
+    h = LogHarvester(job_id="scanJob", log_path=str(tmp_log),
+                    poll_interval=0.1)
+    # ★ 不调用 set_keyword → 扫描模式
+    h.start()
+    try:
+        assert h.wait_for_ready(timeout=5)
+        with open(tmp_log, "a", encoding="utf-8") as f:
+            f.write("[10:00:01] → \"任务结束\"\n")
+        time.sleep(0.3)
+        ok, line = h.check_keyword("任务结束")
+        assert ok, "扫描模式:首次命中即触发"
+        assert "任务结束" in line
+    finally:
+        h.stop()

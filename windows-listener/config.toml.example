@@ -34,12 +34,17 @@ config_path = ""
 # ★ 支持 glob 模式（按天自动发现）:例如 "C:/Software/BetterGI/log/better-genshin-impact*.log"
 #   省略日期部分,收割器会自动取匹配结果中最新(mtime 最大)的文件。
 log_path = ""
-# 日志中表示调度组整体执行完成的关键字。需配合 log_path 使用，留空 -> C 禁用。
-# 推荐带双引号的 "任务结束"(BetterGI TaskRunner 在整组跑完后打印，仅 1 次)。
+# 日志中表示调度组执行完成的关键字。需配合 log_path 使用，留空 -> C 禁用。
+# 推荐带双引号的 "任务结束"(BetterGI TaskRunner 每个配置组结束都打一次 → "任务结束")。
 # ★ 必须带双引号 —— 子任务/分组结束会打 "→ 钓鱼任务结束"/"→ 挖矿任务结束"(无引号),
 #   若写成无引号的 任务结束 会误把子任务当整体完成,提前触发 C 判定。
 # ★ 不要用 "脚本执行结束" —— 那是每个子脚本跑完都打一次的字样,会误触发 C 禁用。
 log_done_keyword = '"任务结束"'
+# 完成判定 C 的触发模式：
+#   count = 关键字累计命中 N 次才触发(N = 任务的组数,默认)。
+#          多组任务中每个组结束都打 "任务结束",只有最后一组结束才触发完成。
+#   first = 首次命中即触发(旧行为,单组任务用)。
+log_done_mode = "count"
 # 完成判定 B 监视的游戏进程名。国服 YuanShen.exe，国际服 GenshinImpact.exe。
 # 二者都列可兼容；若玩其他服请改成实际进程名。
 game_processes = ["YuanShen.exe", "GenshinImpact.exe"]
