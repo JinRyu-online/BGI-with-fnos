@@ -258,8 +258,10 @@ paths:
       tags: [执行]
       summary: 中止当前任务
       description: |
-        中止当前任务。常用于任务进入 `completing` 反悔窗口时阻止收尾动作
-        （如阻止休眠/关机）。终态后调用返回 409。
+        中止当前任务：置 abort 信号并终止 BetterGI 进程（`execution.abort_kills_game=true`
+        时连同游戏进程一起终止），任务归档为 aborted，跳过收尾动作。常用于任务进入
+        `completing` 反悔窗口时阻止休眠/关机，或 running 中主动停止。
+        无活动任务或当前任务已终态时返回 409（仅清理进程请用 /stop）。
       security: [{ BearerAuth: [] }]
       responses:
         '200':
@@ -295,8 +297,10 @@ paths:
         WebSocket 端点：流式推送 BetterGI 日志。Python `websockets` 库不支持 description 字段，
         这里仅作文档参考。协议：
           - 连接后服务端先推一次最近 N 条历史({"ts":..., "lines":[...]})；
-          之后每 0.5s 推一次新日志；
-          - 任务终态后推一次 {"state": <JobStatus>} 并关闭。
+          - 之后按增量推新日志({"ts","lines"}，单批 ≤50 行；收割落后超缓冲时首行带
+            "⚠ 已丢失 N 行"占位)；
+          - 客户端断开前：任务已终态则推 {"last":true, "state": <JobStatus>}；
+            未终态则推一次 {"state": <JobStatus>}；随后关闭。
       parameters:
         - in: path
           name: job_id
@@ -306,3 +310,37 @@ paths:
       responses:
         '101':
           description: Switching Protocols
+
+  /stop:
+    post:
+      tags: [执行]
+      summary: 强制清理进程（停止 BetterGI 与游戏）
+      description: |
+        枚举并终止配置的 BetterGI 与游戏进程（terminate → 等待 5s → 未退出则 kill）。
+        用于进程残留/卡死后的自救。无论是否有活动任务都可调用；
+        若有活动任务（running/completing），同时置 abort 信号并将任务归档为 aborted。
+        注意：本端点不执行收尾动作（不休眠/关机）。
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: 清理完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stopped, killed]
+                properties:
+                  stopped: { type: boolean, example: true }
+                  killed:
+                    type: array
+                    items: { type: string }
+                    description: 被终止的进程名列表
+              examples:
+                stopped: { value: { stopped: true, killed: ["BetterGI.exe", "YuanShen.exe"] } }
+        '401':
+          description: 密钥错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }

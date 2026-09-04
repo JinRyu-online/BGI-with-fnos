@@ -96,6 +96,15 @@ class JobStore:
         """守护线程查询:当前任务是否收到 abort 信号。"""
         return self._abort_event.is_set()
 
+    def set_abort_signal(self) -> None:
+        """仅置 abort 信号，不动状态/不归档/不清槽位（/stop 用）。
+
+        与 abort() 的区别：abort() 会立即把 current 置 ABORTED 并清槽位；
+        /stop 的语义是"信号 + finalize"两步分离（先置信号让 launcher 线程
+        感知，再由 /stop 自己 finalize），因此单独暴露置信号入口。
+        """
+        self._abort_event.set()
+
     def is_idle(self) -> bool:
         """槽位是否空闲（无任务或当前任务已进入终态）。"""
         with self._lock:

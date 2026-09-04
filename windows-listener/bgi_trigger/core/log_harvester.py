@@ -20,7 +20,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Deque
+from typing import Callable, Deque
 
 log = logging.getLogger("bgi_trigger.log_harvester")
 
@@ -42,6 +42,17 @@ class LogHarvester:
     save_path (★ 新参数,可选): 收割到的日志行同步写入的全量文件路径。
         用于事后排查：把 WS 收錄到的所有行都落盘保留,文件名通常为
         {bettergi日志目录}/{job_id}.log。None 表示不落盘(默认)。
+
+    line_sink (★ 新参数,可选): 每收割到一行就回调 line_sink(ln) 一次。
+        用于控制台实时回显 BetterGI 日志（listener 注入 logging 调用）。
+        回调在收割线程内执行,内部包 try/except,回调抛异常不影响收割。
+        None 表示不桥接(默认)。
+
+    增量读取(since(seq)):
+        内部为每行维护全局序号 _total_lines(每收割一行 +1),行 i 的序号为 i+1。
+        since(seq) 返回序号 > seq 的行。因 _buf 是 maxlen deque 会挤掉老行,
+        额外维护 dropped_lines(已被挤出缓冲的行数):当 seq < dropped_lines 时
+        说明客户端落后超过缓冲容量,返回全部缓冲并在首部插入丢失占位提示。
     """
 
     def __init__(
@@ -52,6 +63,7 @@ class LogHarvester:
         poll_interval: float = _POLL_INTERVAL_SEC,
         save_path: str | os.PathLike | None = None,
         required_matches: int = 1,
+        line_sink: Callable[[str], None] | None = None,
     ) -> None:
         """
         log_path 支持两种形态:
@@ -94,6 +106,9 @@ class LogHarvester:
 
         self._lock = threading.Lock()
         self._buf: Deque[str] = deque(maxlen=max_lines)   # 最近 N 行原始文本
+        # ★ 增量读取状态:全局行计数与被 deque 挤掉的行数(与 _buf 同锁)
+        self._total_lines = 0     # 累计收割行数(第 i 行的序号 = i)
+        self._dropped_lines = 0   # 已被 maxlen deque 挤出缓冲的行数
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
         self._ready_evt = threading.Event()   # ★ 新增:进入主收割后置位,供测试同步
@@ -106,6 +121,9 @@ class LogHarvester:
         # ★ 新:全量日志落盘
         self._save_path: Path | None = Path(save_path) if save_path else None
         self._save_file = None                # 懶加载：首次有数据时打开
+
+        # ★ 新:控制台日志桥(每收割一行回调一次;None=不桥接)
+        self._line_sink = line_sink
 
         # ★ 完成判定 C 的持久计数状态(在 _run 里累加,check_keyword 里读取)
         self._log_keyword: str = ""           # 空 = 不计数(外部仍可用 check_keyword 扫缓冲)
@@ -141,6 +159,30 @@ class LogHarvester:
         """取最近 n 条原始日志行。"""
         with self._lock:
             return list(self._buf)[-n:]
+
+    def since(self, seq: int) -> tuple[list[str], int]:
+        """增量读取：返回缓冲中序号 > seq 的行与新的 seq。
+
+        序号规则：第 i 条收割的行序号为 i（i 从 1 开始），返回的 next_seq =
+        当前 _total_lines。调用方循环维护：lines, seq = h.since(seq)。
+
+        客户端落后超过缓冲容量时（seq < dropped_lines，即它要的行已被 maxlen
+        deque 挤掉）：返回当前全部缓冲，并在首元素前插入一条"⚠ 已丢失 N 行"
+        占位字符串（N = 已挤掉行数 - seq，即客户端错过且无法补发的行数）。
+        """
+        with self._lock:
+            buf = list(self._buf)
+            total = self._total_lines
+            dropped = self._dropped_lines
+        if seq < dropped:
+            # 客户端错过 dropped - seq 行且无法补发:加占位提示后给全量缓冲
+            lost = dropped - seq
+            placeholder = f"⚠ 已丢失 {lost} 行（超出缓冲容量）"
+            return [placeholder, *buf], total
+        # 序号 > seq 的行:缓冲内第 k 个元素(k 从 0 起)的序号 = dropped + k + 1,
+        # 要 dropped + k + 1 > seq → k >= seq - dropped → 从 buf[seq-dropped:] 切
+        start = max(0, seq - dropped)
+        return buf[start:], total
 
     def wait_for_lines(self, min_count: int = 1, timeout: float = 5.0) -> list[str]:
         """阻塞直到收割到至少 min_count 行（同步，阻塞调用线程）。
@@ -262,7 +304,16 @@ class LogHarvester:
                         new_lines = [ln for ln in lines if ln.strip()]
                         if new_lines:
                             with self._lock:
+                                # ★ 增量读取状态:先算本轮会被 maxlen 挤掉的行数
+                                #   （extend 后 len(self._buf) 永不超 maxlen，必须先算）
+                                overflow = 0
+                                if self._buf.maxlen is not None:
+                                    overflow = max(0, len(self._buf) + len(new_lines)
+                                                   - self._buf.maxlen)
                                 self._buf.extend(new_lines)
+                                self._total_lines += len(new_lines)
+                                if overflow > 0:
+                                    self._dropped_lines += overflow
                                 # ★ 完成判定 C:持久计数 keyword 命中次数(每个文件行只过一遍,
                                 #   不依赖 deque 缓冲,多组任务中间组不会把早期匹配行挤出)
                                 if self._log_keyword:
@@ -278,6 +329,15 @@ class LogHarvester:
                             self._fire_async()
                             # ★ 新:收割到的行同步落盘
                             self._append_to_savefile(new_lines)
+                            # ★ 新:控制台日志桥(逐行回调,包 try/except 防拖垮收割线程)
+                            if self._line_sink is not None:
+                                for ln in new_lines:
+                                    try:
+                                        self._line_sink(ln)
+                                    except Exception:
+                                        log.warning("harvester for job %s: line_sink raised",
+                                                    self.job_id, exc_info=True)
+                                        break   # 回调持续异常时停止桥接,保收割主流程
                     time.sleep(self._poll)   # ★ 在 if 外:无新数据时也 sleep,避免 busy-spin
         except Exception:
             log.exception("harvester read error for job %s", self._job_id)

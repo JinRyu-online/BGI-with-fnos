@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     注销开机自启计划任务（BGI-Trigger-Listener-Console）

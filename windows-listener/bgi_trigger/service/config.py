@@ -43,6 +43,7 @@ DEFAULTS: dict = {
         "default_after_done": "sleep",  # 默认收尾动作：sleep 休眠 / shutdown 关机 / lock 锁屏 / none
         "grace_seconds": 30,          # 完成判定命中后的反悔窗口（秒），期间可 /abort 阻止收尾
         "keep_history": 20,           # 内存中保留的最近任务历史条数
+        "abort_kills_game": True,     # /abort 时是否同时终止游戏进程
     },
     "tasks": {
         # 任务清单来源目录（相对路径相对于监听器目录）。该目录下所有 *.json 热加载。
@@ -87,6 +88,8 @@ class Execution:
     default_after_done: str
     grace_seconds: int
     keep_history: int
+    # ★ /abort 时是否同时终止游戏进程（True=abort 连游戏一起杀，默认）
+    abort_kills_game: bool = True
 
 
 @dataclass

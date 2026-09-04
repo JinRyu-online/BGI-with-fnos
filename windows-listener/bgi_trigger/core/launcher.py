@@ -4,15 +4,20 @@
 工作放在守护线程中执行，/trigger 立即返回 job_id。
 
 执行流程（守护线程内）：
-  1. 构造命令行并 Popen BetterGI；
-  2. CompletionMonitor 轮询 B/C/D(24h 硬编码兜底),命中即返回 reason；
-  3. 命中后 mark_completing(进入 grace 反悔窗口),等待 grace_seconds；
+  1. 启动预检：BetterGI/游戏是否已在运行（见 _BetterGIExecutor.execute 三分支）；
+  2. 构造命令行并 Popen BetterGI；
+  3. CompletionMonitor 轮询 B/C/E 与 D（min(task.timeout_min*60, 24h) 兜底），
+     命中即返回 reason；
+  4. 命中后 mark_completing(进入 grace 反悔窗口),等待 grace_seconds；
      期间若被 /abort 置为 aborted,则跳过收尾；
-  4. finalize(根据 reason 映射到 DONE/ABNORMAL_EXIT/TIMED_OUT 终态),
+  5. finalize(根据 reason 映射到 DONE/ABNORMAL_EXIT/TIMED_OUT 终态),
      清理残留 BetterGI 进程；
-  5. 仅 DONE 时按 task.after_done 执行收尾(sleep/shutdown/lock/none)。
+  6. 仅 DONE 时按 task.after_done 执行收尾(sleep/shutdown/lock/none)。
 
 异常时标记 failed，不执行收尾。
+
+/abort 主动杀进程：Launcher 记住本 job 拉起的 proc（self._current_proc），
+HTTP 层 abort 时通过 terminate_current_proc() 对其 terminate → wait(5) → kill。
 """
 from __future__ import annotations
 
@@ -22,9 +27,16 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
-from bgi_trigger.core.execution import CompletionMonitor, build_command, make_game_checker
+from bgi_trigger.core.execution import (
+    MAX_TASK_DURATION_SEC,
+    CompletionMonitor,
+    build_command,
+    kill_processes,
+    make_game_checker,
+)
 from bgi_trigger.core.log_harvester import LogHarvester
 from bgi_trigger.core.state import Job, JobStore, JobState
 
@@ -72,21 +84,6 @@ _AFTER_DONE_COMMANDS = {
 }
 
 
-def _job_log_save_path(job_id: str) -> Path | None:
-    """计算 job 对应的全量日志落盘路径。
-
-    ★ 落地位置：windows-listener/log/{job_id}.log
-    与 listener 自己的运行时日志同目录，便于统一归档与清理。
-    （不放在 BetterGI 日志目录，避免污染 BetterGI 自带日志）
-    """
-    try:
-        # 延迟导入：listener.py 定义了 BASE_DIR；launcher 启动时必然已有
-        from listener import BASE_DIR
-        return BASE_DIR / "log" / f"{job_id}.log"
-    except Exception:
-        return None
-
-
 def after_done_command(action: str) -> list[str] | None:
     """将收尾动作名转为系统命令列表。none 返回 None，未知动作抛 ValueError。"""
     if action == "none":
@@ -101,6 +98,10 @@ class Launcher:
     """任务启动器。构造时注入配置与任务存储；以 `launcher(job, task)` 形式调用启动任务。
 
     subprocess_runner 与 sleep 可注入，便于测试替换。
+
+    log_save_dir: job 全量日志落盘目录（None=不落盘）。listener 传入 BASE_DIR / "log"。
+    line_sink: 日志收割桥回调，每收割一行调用一次（listener 注入 logging 回显）。
+    abort_kills_game: /abort 时是否同时终止游戏进程（默认 True，可被配置覆盖）。
     """
 
     def __init__(
@@ -114,6 +115,9 @@ class Launcher:
         log_done_mode: str = "count",
         subprocess_runner: Callable | None = None,
         sleep: Callable = time.sleep,
+        log_save_dir: str | Path | None = None,
+        line_sink: Callable[[str], None] | None = None,
+        abort_kills_game: bool = True,
     ) -> None:
         self._exe = bettergi_exe
         self._game_processes = game_processes
@@ -126,6 +130,15 @@ class Launcher:
         # ★ 默认用_windows 友好的 Popen(前台可见);测试可注入 fake
         self._popen = subprocess_runner or _default_popen
         self._sleep = sleep
+        # ★ job 全量日志落盘目录(None=不落盘);取代旧版对 listener.BASE_DIR 的反向依赖
+        self._log_save_dir = Path(log_save_dir) if log_save_dir else None
+        # ★ 控制台日志桥:harvester 每收割一行回调一次
+        self._line_sink = line_sink
+        # ★ /abort 是否同时终止游戏进程
+        self._abort_kills_game = abort_kills_game
+        # ★ 本 job 拉起的 BetterGI 进程(由 launch 守护线程赋值,供 /abort 主动终止)
+        self._current_proc: subprocess.Popen | None = None
+        self._proc_lock = threading.Lock()
 
     def __call__(self, job: Job, task) -> None:
         """非阻塞启动：开守护线程执行实际工作。"""
@@ -140,14 +153,43 @@ class Launcher:
             else:
                 required = max(1, len(job.groups))
             h = LogHarvester(job_id=job.id, log_path=job.log_path,
-                             save_path=_job_log_save_path(job.id),
-                             required_matches=required)
+                             save_path=self._job_log_save_path(job.id),
+                             required_matches=required,
+                             line_sink=self._line_sink)
             h.set_keyword(self._log_keyword)   # ★ 启用计数模式
             with _harvesters_lock:
                 _harvesters[job.id] = h
             h.start()
         t = threading.Thread(target=self._run, args=(job, task), daemon=True)
         t.start()
+
+    def _job_log_save_path(self, job_id: str) -> Path | None:
+        """计算 job 对应的全量日志落盘路径。
+
+        ★ 落地位置：{log_save_dir}/{job_id}.log（log_save_dir 由构造注入，
+        listener 传 BASE_DIR / "log"）。None=不落盘。
+        与 listener 自己的运行时日志同目录，便于统一归档与清理。
+        （不放在 BetterGI 日志目录，避免污染 BetterGI 自带日志）
+        """
+        if self._log_save_dir is None:
+            return None
+        return self._log_save_dir / f"{job_id}.log"
+
+    def current_bettergi_proc(self) -> subprocess.Popen | None:
+        """返回当前 job 拉起的 BetterGI 进程（无则 None）。HTTP 层 abort 用。"""
+        with self._proc_lock:
+            return self._current_proc
+
+    def terminate_current_proc(self) -> None:
+        """主动终止本 job 拉起的 BetterGI 进程（/abort 路径调用）。
+
+        terminate → wait(5)，超时 kill → wait(3)。进程不存在或已退出则忽略。
+        """
+        with self._proc_lock:
+            proc = self._current_proc
+        if proc is None:
+            return
+        _terminate_proc(proc)
 
     def _run(self, job: Job, task) -> None:
         """线程入口：捕获异常并标记 failed。"""
@@ -177,6 +219,39 @@ def _cleanup_harvester(job_id: str) -> None:
         h.stop()
 
 
+def _terminate_proc(proc) -> None:
+    """终止子进程：terminate → wait(5)，超时 kill → wait(3)。
+
+    ★ terminate() 后必须 wait()：否则 Windows 上进程句柄不回收（僵尸），
+    且无法确认是否真的退出了。所有 subprocess 异常均捕获，尽力而为。
+    """
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+    except Exception:
+        log.exception("failed to terminate BetterGI process")
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        log.warning("BetterGI process did not exit in 5s after terminate; killing")
+        try:
+            proc.kill()
+        except Exception:
+            log.exception("failed to kill BetterGI process")
+            return
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            log.warning("BetterGI process still alive 3s after kill; giving up")
+        except Exception:
+            log.exception("error waiting BetterGI process after kill")
+    except Exception:
+        log.exception("error waiting BetterGI process after terminate")
+
+
 class _BetterGIExecutor:
     """BetterGI 单任务执行体(从 Launcher 拆出,避免 _execute 缩进错误)。
 
@@ -184,6 +259,7 @@ class _BetterGIExecutor:
     """
 
     def __init__(self, launcher: "Launcher") -> None:
+        self._launcher = launcher
         self._exe = launcher._exe
         self._game_processes = launcher._game_processes
         self._log_path = launcher._log_path
@@ -197,22 +273,50 @@ class _BetterGIExecutor:
         bettergi_name = os.path.basename(self._exe)
         self._is_bettergi_running = make_game_checker([bettergi_name])
         self._is_game_running = make_game_checker(self._game_processes)
+        # ★ 残留 BetterGI 清理用：按 basename 匹配枚举进程
+        self._bettergi_name = bettergi_name
+
+    def _kill_residue_bettergi(self) -> list[str]:
+        """枚举并终止残留的 BetterGI 进程（按 exe basename 匹配）。"""
+        killed = kill_processes([self._bettergi_name])
+        if killed:
+            # 短暂等待进程完全退出（句柄释放、日志刷盘），随后正常 Popen
+            self._sleep(1.0)
+        return killed
 
     def execute(self, job: Job, task) -> None:
         """实际执行流程（见模块文档）。"""
-        # ★ 启动前检测：BetterGI 或 游戏 任一已在运行 → 跳过拉起，直接接管监控。
-        # 覆盖场景：用户手动启动的 BetterGI+原神（槽位是空的，单槽保护拦不到），
-        # 此时再 /trigger 不会起第二个实例，而是监听已有实例直到完成。
+        # ★ 启动预检三分支：
+        #   1) BetterGI 与游戏都在跑 → handoff 接管（用户手动启动的场景）；
+        #   2) 仅 BetterGI 在跑（游戏没跑）→ 残留实例：先 terminate 该 BetterGI，
+        #      短暂等待后正常 Popen 拉起（残留实例多半是上次任务卡死的遗留，
+        #      直接接管会失去对启动流程的控制，故清掉重拉）；
+        #   3) 仅游戏在跑 / 都没跑 → 仅游戏时 handoff 接管，都没跑时正常 Popen。
         bettergi_running = self._is_bettergi_running()
         game_running = self._is_game_running()
         proc: subprocess.Popen | None = None
-        if bettergi_running or game_running:
+        if bettergi_running and game_running:
             log.info("job %s: already running (BetterGI=%s, game=%s); skip launching, "
                      "hand off to completion monitor", job.id, bettergi_running, game_running)
+        elif bettergi_running and not game_running:
+            killed = self._kill_residue_bettergi()
+            log.info("job %s: residue BetterGI found (game not running), killed=%s; "
+                     "relaunching", job.id, killed)
+            proc = self._popen(build_command(self._exe, task.groups))
         else:
-            cmd = build_command(self._exe, task.groups)
-            log.info("launching BetterGI for job %s: %s", job.id, cmd)
-            proc = self._popen(cmd)
+            # 仅游戏在跑 → handoff；都没跑 → 正常拉起
+            if game_running:
+                log.info("job %s: game already running without BetterGI; "
+                         "hand off to completion monitor", job.id)
+            else:
+                cmd = build_command(self._exe, task.groups)
+                log.info("launching BetterGI for job %s: %s", job.id, cmd)
+                proc = self._popen(cmd)
+
+        # ★ 记住本 job 拉起的 proc（供 /abort 主动终止）；job 结束时清理。
+        #   handoff 模式 proc=None，/abort 走 kill_processes 兜底。
+        with self._launcher._proc_lock:
+            self._launcher._current_proc = proc
 
         # ★ 取本机已启动的 harvester(由 __call__ 提前创建),注入 monitor
         with _harvesters_lock:
@@ -223,8 +327,20 @@ class _BetterGIExecutor:
             log_done_keyword=self._log_keyword,     # 空 = C 禁用
             jobs=self._jobs,                        # 用于响应 abort
             poll_interval=2.0,
+            # ★ E 实况对账：BetterGI 消失 + 游戏从未出现 → failed（不干等超时）
+            is_bettergi_running=self._is_bettergi_running,
         )
-        reason = monitor.wait()   # timeout_sec 默认 24h 硬编码
+        # ★ 完成判定 D：接入任务级 timeout_min（分钟）。
+        #   deadline = min(task.timeout_min * 60, MAX_TASK_DURATION_SEC)；
+        #   timeout_min <= 0 时回退 MAX_TASK_DURATION_SEC（防呆）。
+        #   handoff 模式（未拉起进程直接接管）同样生效。
+        try:
+            task_timeout_min = int(getattr(task, "timeout_min", 0) or 0)
+        except (TypeError, ValueError):
+            task_timeout_min = 0
+        timeout_sec = min(task_timeout_min * 60, MAX_TASK_DURATION_SEC) \
+            if task_timeout_min > 0 else MAX_TASK_DURATION_SEC
+        reason = monitor.wait(timeout_sec=timeout_sec)
         log.info("job %s completion reason: %s", job.id, reason)
 
         self._jobs.mark_completing(reason)
@@ -239,6 +355,7 @@ class _BetterGIExecutor:
                 if self._jobs.current is job and job.state == JobState.COMPLETING:
                     self._jobs.finalize(JobState.ABORTED)
                     log.info("job %s finalized as ABORTED from grace window", job.id)
+                self._cleanup_current_proc()
                 return
             step = min(0.5, deadline)
             self._sleep(step)
@@ -249,9 +366,11 @@ class _BetterGIExecutor:
         # 再次取出 current:如果 abort 已清槽位,job 对象已被替换;跳过所有操作。
         if self._jobs.current is not job:
             log.info("job %s slot cleared (abort/restart); skipping finalize and after_done", job.id)
+            self._cleanup_current_proc()
             return
         if job.state == JobState.ABORTED:
             log.info("job %s aborted; skipping after_done", job.id)
+            self._cleanup_current_proc()
             return
 
         # ★ 新映射：reason → JobState
@@ -263,7 +382,7 @@ class _BetterGIExecutor:
             final = JobState.TIMED_OUT
         elif reason == "aborted":
             final = JobState.ABORTED
-        else:   # "error" 等内部异常
+        else:   # "failed"/"error" 等内部异常
             final = JobState.FAILED
         self._jobs.finalize(final)
         log.info("job %s finalized: reason=%s → state=%s", job.id, reason, final.value)
@@ -272,10 +391,12 @@ class _BetterGIExecutor:
         if final != JobState.DONE:
             log.info("job %s: final state is %s (not DONE), skipping after_done",
                      job.id, final.value)
+            self._cleanup_current_proc()
             return
 
         # 清理可能仍残留的 BetterGI 进程。
-        self._terminate(proc)
+        _terminate_proc(proc)
+        self._cleanup_current_proc()
 
         # 执行收尾动作。
         cmd_after = after_done_command(task.after_done)
@@ -286,14 +407,7 @@ class _BetterGIExecutor:
             except Exception:
                 log.exception("after_done command failed")
 
-    @staticmethod
-    def _terminate(proc) -> None:
-        """若 BetterGI 进程仍在运行，尝试 terminate。
-        proc 为 None 表示本次 job 未拉起新进程（已运行，跳过），无需清理。"""
-        if proc is None:
-            return
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-        except Exception:
-            log.exception("failed to terminate BetterGI process")
+    def _cleanup_current_proc(self) -> None:
+        """job 结束后清空 Launcher 记住的 proc 引用。"""
+        with self._launcher._proc_lock:
+            self._launcher._current_proc = None
