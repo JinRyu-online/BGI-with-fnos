@@ -17,6 +17,15 @@ windows-listener/log/
 nas-app/**/*.fpk
 nas-app/app/docker/.build/
 
+# 前端 SPA（nas-app/frontend）构建产物：部署产物 static/spa/ 是否入库见部署策略，
+# 此处仅忽略本地构建目录与依赖
+nas-app/frontend/node_modules/
+nas-app/frontend/dist/
+nas-app/frontend/*.local
+
+# ZCode 本地工具目录
+.zcode/
+
 # fnpack 打包产物
 *.fpk
 

@@ -14,12 +14,12 @@
 ## 常用命令
 
 ```bash
-# Windows 端测试（81 个单测；在 windows-listener/ 下）
+# Windows 端测试（124 个单测；在 windows-listener/ 下）
 python -m pytest tests/ -q
 python -m pytest tests/test_tasks.py            # 单文件
 python -m pytest tests/test_app.py::test_trigger_starts_job_and_returns_id  # 单测
 
-# NAS 端测试（40 个单测；在 nas-app/app/docker/ 下）
+# NAS 端测试（83 个单测；在 nas-app/app/docker/ 下）
 python -m pytest tests/ -q
 
 # 本地跑 NAS 应用（容器外开发）
@@ -96,7 +96,11 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 
 `/trigger` 调 `deps.launch(job, task)` 立即返回 202 + job_id；实际工作在 daemon 线程：Popen BetterGI → `CompletionMonitor.wait()` 阻塞轮询 → mark_completing → grace 窗口（内循环查 abort 信号）→ finalize → 仅 DONE 时清残留进程 + 执行 after_done。
 
-**启动前检测**：拉起前先探测 BetterGI.exe 与游戏进程是否已在运行（用户手动启动的场景——槽位为空，单槽保护拦不到），任一命中则跳过 Popen，直接交给 CompletionMonitor 接管。
+**启动前检测（三分支）**：拉起前探测 BetterGI.exe 与游戏进程——两者都在跑 → handoff 接管监控；仅 BetterGI 残留（游戏已关）→ 先清掉残留再正常 Popen；仅游戏在跑 → handoff。
+
+**进程控制**：`POST /stop` 强制清理（terminate→wait 5s→kill，kill_processes 在 execution.py）；`/abort` 置信号 + 杀 BetterGI（`execution.abort_kills_game=true` 时连游戏）。`CompletionMonitor` 维护 seen_game 标志对账：BetterGI 消失且游戏从未出现过 → `failed`（防卡 24h）。
+
+**NAS 前端 SPA（nas-app/frontend/）**：Vite+Vue3+TS，`base: '/spa/'`，构建产物经 `npm run build:deploy` 复制到 `app/docker/app/static/spa/`，由 main.py `app.mount("/spa", StaticFiles(html=True))` 服务；旧 Jinja 首页保留为兼容入口并链向 `/spa/`。WS 一律走同源代理 `/api/ws/logs/{job_id}`（main.py 薄透传，websockets 库连上游），**严禁浏览器直连 Windows IP**（HTTPS mixed content 教训）。NAS 端后台对账循环（lifespan 启动，`reconcile_interval` 注入，0=禁用）持续把 running/completing 历史刷成终态——浏览器关闭不再卡"运行中"。`TERMINAL_STATES` 三端（state.py / listener_client.py / frontend constants.ts）逐字对齐，改一处必须同步另两处。
 
 ## 关键约定与陷阱（改代码前必读）
 
@@ -138,9 +142,11 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 ## 测试风格
 
 - 两端都走「依赖注入 + fake + FastAPI TestClient」：HTTP 层不触网，完成判定逻辑与真实进程解耦。
-- Windows 端测试文件按模块拆（test_state / test_execution / test_launcher / test_app / test_auth / test_config / test_tasks / test_smoke_wiring）。
+- Windows 端测试文件按模块拆（test_state / test_execution / test_launcher / test_app / test_auth / test_config / test_tasks / test_smoke_wiring，另有 test_stop / test_launcher_extra / test_execution_extra / test_harvester_since）。
 - `LogHarvester` 提供 `wait_for_ready()` / `wait_for_lines()` 同步原语供测试规避时序竞争——写相关测试时先用它们，不要 sleep 硬编码。
 - `test_smoke_wiring.py` 验证 listener.py 端到端装配；改装配逻辑后跑它。
+- NAS 端对账循环测试用 `reconcile_interval` 注入短间隔 + `with TestClient(app)` 触发 lifespan；WOL 测试 mock `socket.sendto`；WS 代理测试起线程内 fake upstream（websockets.serve 随机端口）。
+- 前端：`npm run build`（vue-tsc 严格检查）+ `npm run smoke`（dev server 路由 200 自测）；无浏览器自动化，布局靠 CSS 机制保证（.page 纵向滚动 + min-width:0 + 触控热区外扩）。
 
 ## 文档地图
 
