@@ -1,0 +1,24 @@
+{
+  "name": "bgi-trigger-spa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "BetterGI Trigger 移动端 SPA（Wave 2 正式前端）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:deploy": "npm run build && node scripts/deploy.mjs",
+    "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.0",
+    "vue-tsc": "^3.0.4"
+  }
+}

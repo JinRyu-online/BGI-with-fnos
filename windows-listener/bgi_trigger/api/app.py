@@ -1,4 +1,4 @@
-"""FastAPI 应用模块：装配监听器的六个 HTTP 接口。
+"""FastAPI 应用模块：装配监听器的 HTTP 接口。
 
 依赖（配置、任务清单、鉴权、任务存储、启动回调）通过 AppDeps 注入，
 使本模块可在不依赖真实 BetterGI 的情况下单元测试（用 TestClient + 假启动回调）。
@@ -9,21 +9,23 @@
   GET  /tasks    鉴权，返回任务清单
   POST /trigger  鉴权，启动任务，返回 job_id（202）；忙时 409；未知任务 404
   GET  /status   鉴权，按 job_id 查任务状态
-  POST /abort    鉴权，中止当前任务
+  POST /abort    鉴权，中止当前任务（含主动终止 BetterGI 进程）
+  POST /stop     鉴权，急停：清理所有 BetterGI/游戏进程 + abort 活动任务
+                 （"卡死后自救"入口：无活动 job 时也照常清理残留进程）
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import Callable
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from bgi_trigger.service.auth import AuthError, AuthState
-from bgi_trigger.core.state import Job, JobStore
+from bgi_trigger.core.state import Job, JobState, JobStore
 from bgi_trigger.core.tasks import Task, TaskRegistry, TaskNotFound
 from bgi_trigger.core.launcher import get_harvester
 
@@ -35,6 +37,9 @@ _STATUS_404_SUPPRESS_SEC = 300.0               # 同一 job_id 5 分钟内不重
 
 SERVICE_NAME = "bgi-trigger"  # NAS 扫描时 /health 返回的服务标识，必须固定
 log = logging.getLogger("bgi_trigger.app")
+
+# ★ WS 单次推送的日志行数上限；超出部分下一轮循环继续推。
+_WS_MAX_LINES_PER_PUSH = 50
 
 
 @dataclass
@@ -48,10 +53,44 @@ class AppDeps:
     launch: Callable[[Job, Task], None]  # 启动回调：非阻塞，实际工作在守护线程
     log_path: str = ""  # BetterGI 日志路径（空=不收割，WS 无日志流）
 
+    # ★ /stop 与 /abort(abort_kills_game=True 时) 的进程清理回调：
+    #   函数签名 kill_processes(names) -> list[str]（被终止的进程名列表）。
+    #   None 时退化为 no-op（测试/无 psutil 场景）。
+    kill_processes: Callable[[list[str]], list[str]] | None = None
+
+    # ★ /abort 时是否同时终止游戏进程（对应配置 [execution] abort_kills_game，
+    #   默认 True）。注入为标量便于测试；listener 从 config 传入。
+    abort_kills_game: bool = True
+
+    # ★ /abort 主动终止"本 job 拉起的 BetterGI 子进程"的回调（terminate → wait →
+    #   kill）。None 时跳过（测试场景）。
+    terminate_current_proc: Callable[[], None] | None = None
+
+    # BetterGI exe basename（/stop 匹配用；空则只匹配 game_processes）
+    bettergi_name: str = ""
+
+    # 完成判定 B 监视的游戏进程名（/stop 与 /abort 的进程清理匹配用）
+    game_processes: list[str] = dataclass_field(default_factory=list)
+
     @property
     def api_key(self) -> str:
         """配对密钥（供 /key 接口暴露）。见 auth.api_key。"""
         return self.auth.api_key
+
+    def stop_target_names(self) -> list[str]:
+        """/stop 应终止的进程名集合：BetterGI exe basename + game_processes。
+
+        bettergi_name 为空时仅用 game_processes。
+        """
+        names: list[str] = []
+        if self.bettergi_name:
+            names.append(self.bettergi_name)
+        names.extend(self.game_processes)
+        return names
+
+    def launch_game_process_names(self) -> list[str]:
+        """/abort(abort_kills_game=True) 应终止的游戏进程名集合。"""
+        return list(self.game_processes)
 
 
 class TriggerBody(BaseModel):
@@ -160,15 +199,65 @@ def create_app(deps: AppDeps) -> FastAPI:
 
     @app.post("/abort")
     def abort(request: Request, authorization: str | None = Header(default=None)) -> dict:
-        """中止当前任务。无活动任务时 409。"""
+        """中止当前任务。无活动任务 409。
+
+        活动任务收到 abort：
+          1. 置 abort 信号（现有机制，launcher 线程感知后尽快退出并跳过 after_done）；
+          2. 主动终止本 job 拉起的 BetterGI 进程（terminate → wait(5) → kill）；
+          3. abort_kills_game=True 时同时终止游戏进程（kill_processes）。
+
+        已终态任务（is_idle()==True 或 current 为 None）→ 409 "no active job"：
+        终态 job 不再归档（修复旧版重复 append 历史的 bug）。
+        """
         client_ip = request.client.host if request.client else "?"
         authenticate(request, authorization)
-        if deps.jobs.current is None:
+        current = deps.jobs.current
+        # ★ 语义修正:is_idle() 为 True(无 current 或 current 已终态)一律 409,
+        #   不再对终态 job 重复 abort/归档。
+        if current is None or deps.jobs.is_idle():
             log.warning("abort refused: no active job (from %s)", client_ip)
             raise HTTPException(status_code=409, detail="no active job")
         deps.jobs.abort()
-        log.info("abort accepted: job=%s (from %s)", deps.jobs.current.id if deps.jobs.current else "?", client_ip)
+        log.info("abort accepted: job=%s (from %s)", current.id, client_ip)
+        # ★ 主动终止本 job 拉起的 BetterGI 子进程（terminate → wait(5) → kill）
+        if deps.terminate_current_proc is not None:
+            try:
+                deps.terminate_current_proc()
+            except Exception:
+                log.exception("abort: failed to terminate BetterGI proc")
+        # ★ abort_kills_game=True 时同时终止游戏进程
+        if deps.abort_kills_game and deps.kill_processes is not None:
+            killed = _safe_kill(deps, deps.launch_game_process_names())
+            if killed:
+                log.info("abort: killed game processes %s", killed)
         return {"aborted": True}
+
+    @app.post("/stop")
+    def stop(request: Request, authorization: str | None = Header(default=None)) -> dict:
+        """急停端点（"卡死后自救"入口）。
+
+        行为：
+          1. 用 kill_processes 终止所有名字匹配 BetterGI exe basename 或
+             game_processes 的进程（terminate → 最多等 5s → kill → 确认）；
+          2. 若有活动 job（is_idle()==False）：置 abort 信号，并在 current 仍处于
+             running/completing 态时 finalize(JobState.ABORTED)；
+          3. 无活动 job 时也照常清理残留进程。
+
+        返回 {"stopped": true, "killed": [被终止的进程名列表]}。
+        """
+        client_ip = request.client.host if request.client else "?"
+        authenticate(request, authorization)
+        log.warning("stop requested from %s", client_ip)
+        # 1. 清理 BetterGI + 游戏进程（先杀进程再动状态，避免状态先变但进程残留）
+        killed = _safe_kill(deps, deps.stop_target_names())
+        # 2. 活动 job → abort 信号 + finalize ABORTED（仅 running/completing 态）
+        current = deps.jobs.current
+        if current is not None and not deps.jobs.is_idle():
+            deps.jobs.set_abort_signal()  # 置 abort 信号（幂等，launcher 线程感知后退出）
+            if current.state in (JobState.RUNNING, JobState.COMPLETING):
+                deps.jobs.finalize(JobState.ABORTED)
+            log.info("stop: job %s aborted (state=%s)", current.id, current.state.value)
+        return {"stopped": True, "killed": killed}
 
     # ★★★ WebSocket 端点:浏览器直接连此端点获取实时日志 ★★★
     @app.websocket("/ws/logs/{job_id}")
@@ -177,8 +266,11 @@ def create_app(deps: AppDeps) -> FastAPI:
 
         协议:
           → 客户端连接即推送最近 3 条历史 + 最新任务状态
-          → 之后每条新日志以 {"ts","lines":[...]} 推送
-          → 任务结束时最后推一条 {"last":True, "state":"done/..."} 后关闭
+          → 之后每批新日志以 {"ts","lines":[...]} 推送（burst 修复：
+            本地维护 sent_seq，用 harvester.since(sent_seq) 增量取行，
+            单次最多推 50 行，超出部分下一轮继续推，不再丢行）
+          → 任务结束（mark_finished）后主循环退出前再 flush 一次 since，
+            确保最后几行不丢，最后推一条 {"last":True, "state":"done/..."} 后关闭
         安全: 无需鉴权(MVP 内网,同 NAS 当前模型);IP 取自 X-Forwarded-For 或 client。
         """
         await websocket.accept()
@@ -204,15 +296,20 @@ def create_app(deps: AppDeps) -> FastAPI:
         except Exception:
             pass
 
-        # ★ 主循环: 等新行 or 收割器退出 or 客户端断开
+        # ★ 主循环: 等新行 or 收割器退出 or 客户端断开。
+        # ★ burst 丢行修复:不再用 recent(1)（burst 多行只推最后一条），
+        #   改为本地 sent_seq + since() 增量推送，且 mark_finished 后退出前
+        #   再 flush 一次，确保最后一波行不丢。
+        sent_seq = 0
         try:
             while True:
                 new = await harvester.wait_new(timeout=2.0)
                 if new:
-                    await websocket.send_json({
-                        "ts": time.time(),
-                        "lines": harvester.recent(1),     # 推送最新一条
-                    })
+                    lines, sent_seq = harvester.since(sent_seq)
+                    # 单次最多推 _WS_MAX_LINES_PER_PUSH 行,超出部分下轮继续推
+                    while lines:
+                        batch, lines = lines[:_WS_MAX_LINES_PER_PUSH], lines[_WS_MAX_LINES_PER_PUSH:]
+                        await websocket.send_json({"ts": time.time(), "lines": batch})
                 # 退出条件
                 if harvester.finished:
                     break
@@ -221,7 +318,27 @@ def create_app(deps: AppDeps) -> FastAPI:
         except Exception:
             log.exception("ws/logs/%s error", job_id)
         finally:
-            # 关闭前发一次状态
+            # ★ 最后 flush:mark_finished 后收割线程可能又收割了最后几行,
+            #   退出前把 since(sent_seq) 的剩余行全部推完。
+            try:
+                lines, sent_seq = harvester.since(sent_seq)
+                while lines:
+                    batch, lines = lines[:_WS_MAX_LINES_PER_PUSH], lines[_WS_MAX_LINES_PER_PUSH:]
+                    await websocket.send_json({"ts": time.time(), "lines": batch})
+            except Exception:
+                pass
+            # ★ 终止帧:任务已结束时先推 {"last":True, "state":...} 再关闭,
+            #   客户端据此干净收尾(不再依赖轮询终态兜底)。与 docstring 协议一致。
+            try:
+                if harvester.finished:
+                    final_job = deps.jobs.get(job_id)
+                    await websocket.send_json({
+                        "last": True,
+                        "state": final_job.to_dict() if final_job else {"state": "unknown"},
+                    })
+            except Exception:
+                pass
+            # 非终态断开(客户端主动断)也补一次状态快照,便于前端恢复现场
             try:
                 if not harvester.finished:
                     await websocket.send_json({"state": (deps.jobs.get(job_id) or {}).to_dict()
@@ -231,3 +348,14 @@ def create_app(deps: AppDeps) -> FastAPI:
             await websocket.close()
 
     return app
+
+
+def _safe_kill(deps: AppDeps, names: list[str]) -> list[str]:
+    """调用注入的 kill_processes，失败（含未注入）返回 []，不让 /stop /abort 500。"""
+    if deps.kill_processes is None or not names:
+        return []
+    try:
+        return list(deps.kill_processes(names))
+    except Exception:
+        log.exception("kill_processes failed for %s", names)
+        return []

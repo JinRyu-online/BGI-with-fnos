@@ -1,0 +1,207 @@
+/* ============================================================
+   BetterGI Trigger · 全局基础样式
+   与 docs/原型/bgi-prototype.html 的 <style> 段逐条对齐（视觉唯一真相源）
+   组件级样式（task-card / hist-card / pair-card 等页面区块）就近写在
+   各组件的 <style scoped>，本文件只放全局/共享区块。
+   ============================================================ */
+
+/* ---------- 基础重置 ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  color: var(--text-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+
+/* ---------- 桌面端：手机框式外观 ---------- */
+.desktop-note {
+  display: none;
+  position: fixed; bottom: 12px; left: 0; right: 0;
+  text-align: center; font-size: var(--font-xs); color: var(--text-3);
+  z-index: 1;
+}
+@media (min-width: 700px) {
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #e6ecf7 0%, #eef1f6 55%, #e8ebf1 100%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .app-shell {
+    height: 844px;
+    max-height: calc(100vh - 48px);
+    border-radius: 32px;
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 24px 64px rgba(15, 23, 42, .18);
+  }
+  .desktop-note { display: block; }
+}
+
+/* ---------- app-shell（移动端全屏，桌面端居中手机框）---------- */
+.app-shell {
+  width: 100%;
+  max-width: var(--shell-max);
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 顶栏 ---------- */
+.app-header {
+  height: var(--header-height);
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+.app-title { font-size: var(--font-lg); font-weight: 700; }
+.device-chip {
+  margin-left: auto;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  background: var(--brand-weak); color: var(--brand);
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.device-chip.unpaired { background: var(--state-idle-weak); color: var(--state-idle-text); }
+
+/* ---------- 页面容器 ---------- */
+.pages { flex: 1; position: relative; overflow: hidden; }
+.page {
+  position: absolute; inset: 0;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: var(--space-4) var(--space-4)
+           calc(var(--tabbar-height) + env(safe-area-inset-bottom) + 24px);
+  animation: pageIn .18s ease-out;
+}
+@keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ---------- 底部 Tab 导航 ---------- */
+.tabbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
+  height: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  background: rgba(255, 255, 255, .94);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+}
+.tab {
+  flex: 1; min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: none; background: none;
+  font-size: 11px; color: var(--text-2);
+  transition: color .15s;
+}
+.tab .tab-icon { font-size: 20px; line-height: 1; }
+.tab.active { color: var(--brand); font-weight: 600; }
+
+/* ---------- 通用卡片 / 标题 / 徽章 ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid rgba(229, 231, 235, .6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.sec-title {
+  font-size: var(--font-sm); font-weight: 600; color: var(--text-2);
+  letter-spacing: .04em;
+  margin: var(--space-4) 4px var(--space-2);
+}
+.badge {
+  display: inline-block; flex-shrink: 0;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+/* 7 态徽章 + idle 占位态：弱底 + 深字（token 一一对应） */
+.b-idle           { background: var(--state-idle-weak);           color: var(--state-idle-text); }
+.b-running        { background: var(--state-running-weak);        color: var(--state-running-text); }
+.b-completing     { background: var(--state-completing-weak);     color: var(--state-completing-text); }
+.b-done           { background: var(--state-done-weak);           color: var(--state-done-text); }
+.b-failed         { background: var(--state-failed-weak);         color: var(--state-failed-text); }
+.b-timed_out      { background: var(--state-timed-out-weak);      color: var(--state-timed-out-text); }
+.b-aborted        { background: var(--state-aborted-weak);        color: var(--state-aborted-text); }
+.b-abnormal_exit  { background: var(--state-abnormal-exit-weak);  color: var(--state-abnormal-exit-text); }
+
+/* ---------- 按钮（触控目标 ≥44px，active 缩放反馈）---------- */
+.btn {
+  min-height: 44px;
+  border: none; border-radius: var(--radius-md);
+  font-size: var(--font-md); font-weight: 600;
+  padding: 0 var(--space-4);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  transition: transform .06s, background .15s, opacity .15s, box-shadow .3s;
+  user-select: none; -webkit-user-select: none;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-primary:active:not(:disabled) { background: var(--brand-pressed); }
+.btn-secondary { background: #eef1f5; color: var(--text-1); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:active:not(:disabled) { background: var(--danger-pressed); }
+.btn-danger-outline { background: var(--surface); color: var(--danger); border: 1.5px solid var(--danger); }
+.btn-danger-outline:active:not(:disabled) { background: var(--danger-weak); }
+.btn-block { width: 100%; }
+/* completing 反悔窗口：中止按钮脉冲提醒 */
+.btn-attention { animation: attn 1s ease-in-out infinite; }
+@keyframes attn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .45); }
+  50%      { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+}
+
+/* ---------- 加载 spinner ---------- */
+.spinner {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: #fff; border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 骨架屏 ---------- */
+.sk-block {
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  background: linear-gradient(90deg, #e9edf2 25%, #f5f7fa 37%, #e9edf2 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+/* ---------- 分组链 pill（任务卡/当前任务卡共用） ---------- */
+.groups { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.g-pill {
+  font-size: var(--font-xs); padding: 2px 8px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+}
+.g-pill.last { background: var(--info-weak); color: #1d4ed8; border-color: #bfdbfe; font-weight: 600; }
+.g-arrow { color: var(--text-3); font-size: 11px; }
+
+/* ---------- 属性 pill（⏱ 时长 / 收尾动作） ---------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 4px 10px; border-radius: var(--radius-sm);
+}
+.pill-time { background: var(--info-weak); color: #1d4ed8; }
+.pill-after { background: var(--success-weak); color: #15803d; }
+.tc-props { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ---------- 空态提示 ---------- */
+.empty-hint { text-align: center; color: var(--text-3); font-size: var(--font-sm); padding: var(--space-5) 0; }

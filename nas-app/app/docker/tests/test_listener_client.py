@@ -1,6 +1,6 @@
 import pytest
 
-from listener_client import ListenerClient, ListenerError, ListenerAuthError
+from listener_client import ListenerClient, ListenerError, ListenerAuthError, ListenerNotFound, TERMINAL_STATES
 
 
 class _FakeResp:
@@ -93,3 +93,48 @@ def test_network_error_raises_listener_error():
 
     with pytest.raises(ListenerError):
         c.tasks()
+
+
+def test_404_raises_listener_not_found():
+    """404 → ListenerNotFound（ListenerError 子类，兼容现有 except 顺序）。"""
+    t = _FakeTransport([("GET", "/status", 404, {})])
+    c = _client(t)
+
+    with pytest.raises(ListenerNotFound):
+        c.status("ghost-job")
+
+
+def test_listener_not_found_is_listener_error():
+    """ListenerNotFound 必须是 ListenerError 子类：现有 `except ListenerError` 不破坏。"""
+    assert issubclass(ListenerNotFound, ListenerError)
+
+
+def test_401_takes_precedence_over_404():
+    """401 优先于 404 判定：鉴权错误不会被误判为 NotFound。"""
+    t = _FakeTransport([("GET", "/tasks", 401, {})])
+    c = _client(t)
+
+    with pytest.raises(ListenerAuthError):
+        c.tasks()
+
+
+def test_stop_posts_to_listener():
+    """stop() → POST /stop，携带鉴权头，返回响应 JSON。"""
+    t = _FakeTransport([("POST", "/stop", 200, {"stopped": True, "killed": ["bgi.exe"]})])
+    c = _client(t)
+
+    result = c.stop()
+    assert result == {"stopped": True, "killed": ["bgi.exe"]}
+    method, path, headers, _ = t.calls[0]
+    assert (method, path) == ("POST", "/stop")
+    assert headers["Authorization"] == "Bearer secret"
+
+
+def test_terminal_states_align_with_windows_listener():
+    """与 windows-listener bgi_trigger/core/state.py JobState 终态逐字对齐。
+
+    历史事故："timeout" 拼错（实际 timed_out）+ 漏 abnormal_exit。
+    """
+    assert TERMINAL_STATES == frozenset(
+        {"done", "abnormal_exit", "timed_out", "failed", "aborted"})
+    assert "timeout" not in TERMINAL_STATES  # 拼错的名字绝不能再出现

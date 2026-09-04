@@ -1,5 +1,5 @@
 # NAS 应用容器镜像。
-# 基于 python:3.12-slim，安装 FastAPI + Jinja2 + psutil + httpx，
+# 基于 python:3.12-slim，安装 FastAPI + Jinja2 + psutil + httpx + websockets，
 # 拷贝 app/ 源码到 /app，以 uvicorn 启动。
 # 持久化数据经 docker-compose 挂载到 /data（BGI_DATA_DIR）。
 FROM python:3.12-slim

@@ -118,6 +118,20 @@ if (-not (Test-Path (Join-Path $tasksDir "tasks.json"))) {
     Copy-Item (Join-Path $tasksDir "tasks.json.example") (Join-Path $tasksDir "tasks.json")
 }
 
+# ---------- 3b. 防火墙放行监听端口 ----------
+# 否则 NAS / 局域网其他设备无法访问 listener（本地 127.0.0.1 不受限）。
+# 幂等：先删除同名规则再新增，重复运行本脚本不会因规则已存在而报错。
+# 执行失败只警告不中断（部分环境禁用 netsh 或组策略管控防火墙）。
+Write-Host "[3b/5] 配置防火墙规则（放行 TCP 8765）..." -ForegroundColor Cyan
+$FWNAME = "BGI-Trigger Listener"
+netsh advfirewall firewall delete rule name="$FWNAME" | Out-Null
+netsh advfirewall firewall add rule name="$FWNAME" dir=in action=allow protocol=TCP localport=8765
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[警告] 防火墙规则添加失败（可手动放行 TCP 8765 端口）。" -ForegroundColor Yellow
+} else {
+    Write-Host "      防火墙规则已就绪。" -ForegroundColor Green
+}
+
 # ---------- 4. 注册计划任务 ----------
 # /SC ONLOGON  登录后触发
 # /RL HIGHEST  最高权限（BetterGI 需要管理员）

@@ -3,3 +3,4 @@ uvicorn>=0.29
 jinja2>=3.1
 psutil>=5.9       # 子网发现（替代 netifaces，纯 Python 无需 C 编译）
 httpx>=0.27       # 调用 Windows 监听器
+websockets>=12.0  # /api/ws/logs 实时日志 WS 代理（连接监听器 /ws/logs/{job_id}）

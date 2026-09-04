@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import sys
 import tkinter as tk
@@ -34,6 +35,7 @@ import uvicorn
 
 from bgi_trigger import __version__ as VERSION
 from bgi_trigger.api.app import AppDeps, create_app
+from bgi_trigger.core import execution
 from bgi_trigger.service.auth import AuthState
 from bgi_trigger.service.config import ListenerConfig
 from bgi_trigger.core.launcher import Launcher
@@ -127,6 +129,12 @@ def main() -> int:
         log_done_mode=getattr(config.bettergi, "log_done_mode", "count"),
         grace_seconds=config.execution.grace_seconds,
         jobs=jobs,
+        # ★ job 全量日志落盘目录（取代旧版 launcher 对 listener.BASE_DIR 的反向依赖）
+        log_save_dir=BASE_DIR / "log",
+        # ★ 控制台日志桥：BetterGI 日志每收割一行实时回显到前台终端/文件日志
+        line_sink=lambda ln: logging.getLogger("bgi_trigger.bettergi").info("%s", ln),
+        # ★ /abort 时是否同时终止游戏进程
+        abort_kills_game=config.execution.abort_kills_game,
     )
 
     deps = AppDeps(
@@ -137,6 +145,15 @@ def main() -> int:
         jobs=jobs,
         launch=launcher,
         log_path=config.bettergi.log_path,
+        # ★ /stop 与 /abort 的进程清理：注入 kill_processes（内部已延迟导入 psutil）
+        kill_processes=execution.kill_processes,
+        # ★ /abort 主动终止本 job 拉起的 BetterGI 子进程
+        terminate_current_proc=launcher.terminate_current_proc,
+        # ★ /abort 时是否同时终止游戏进程（[execution] abort_kills_game，默认 True）
+        abort_kills_game=config.execution.abort_kills_game,
+        # ★ 进程名匹配：BetterGI exe basename + game_processes
+        bettergi_name=os.path.basename(config.bettergi.exe_path or ""),
+        game_processes=list(config.bettergi.game_processes),
     )
     app = create_app(deps)
 

@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5b8def">
+<title>BetterGI Trigger · 移动端原型</title>
+<style>
+/* ============================================================
+   BetterGI Trigger · Wave 1 交互原型（纯 mock，零外部依赖）
+   主题 token 全部集中在 :root，与 docs/gui-design.md 完全一致
+   ============================================================ */
+:root {
+  /* ===== 品牌色 ===== */
+  --brand: #5b8def;
+  --brand-pressed: #3a6fd8;
+  --brand-weak: #eef3fe;
+
+  /* ===== 中性色 ===== */
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e5e7eb;
+  --border-strong: #d7dbe0;
+  --text-1: #1e293b;
+  --text-2: #64748b;
+  --text-3: #94a3b8;
+
+  /* ===== 语义色 ===== */
+  --danger: #dc2626;
+  --danger-pressed: #b91c1c;
+  --danger-weak: #fee2e2;
+  --warning: #d97706;
+  --warning-weak: #fef3c7;
+  --success: #16a34a;
+  --success-weak: #dcfce7;
+  --info: #2563eb;
+  --info-weak: #dbeafe;
+
+  /* ===== 任务状态色（7 后端态 + idle 前端占位态）===== */
+  --state-idle: #94a3b8;            /* 灰 */
+  --state-idle-weak: #eef0f3;
+  --state-idle-text: #64748b;
+  --state-running: #f59e0b;         /* 黄（呼吸） */
+  --state-running-weak: #fef3c7;
+  --state-running-text: #b45309;
+  --state-completing: #3b82f6;      /* 蓝（呼吸） */
+  --state-completing-weak: #dbeafe;
+  --state-completing-text: #1d4ed8;
+  --state-done: #22c55e;            /* 绿 */
+  --state-done-weak: #dcfce7;
+  --state-done-text: #15803d;
+  --state-failed: #ef4444;          /* 红 */
+  --state-failed-weak: #fee2e2;
+  --state-failed-text: #b91c1c;
+  --state-timed-out: #f97316;       /* 橙 */
+  --state-timed-out-weak: #ffedd5;
+  --state-timed-out-text: #c2410c;
+  --state-aborted: #b4534b;         /* 灰红 */
+  --state-aborted-weak: #f6e7e5;
+  --state-aborted-text: #9a443d;
+  --state-abnormal-exit: #ef4444;   /* 红 */
+  --state-abnormal-exit-weak: #fee2e2;
+  --state-abnormal-exit-text: #b91c1c;
+
+  /* 呼吸光晕（与状态色配套的 rgba，仅 running/completing 使用） */
+  --glow-running: rgba(245, 158, 11, .45);
+  --glow-completing: rgba(59, 130, 246, .45);
+
+  /* ===== 日志面板（深色）===== */
+  --log-bg: #0b1220;
+  --log-head-bg: #0f172a;
+  --log-border: #1e293b;
+  --log-text: #cbd5e1;
+  --log-text-dim: #64748b;
+  --log-keyword: #fbbf24;   /* “任务结束”关键字 黄 */
+  --log-error: #f87171;     /* 错误行 红 */
+  --log-sys: #22d3ee;       /* 系统消息 青 */
+
+  /* ===== 间距刻度（4px 基准）===== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ===== 圆角 ===== */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* ===== 字号阶梯 ===== */
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-base: 14px;
+  --font-md: 15px;
+  --font-lg: 17px;
+  --font-xl: 20px;
+  --font-2xl: 24px;
+
+  /* ===== 字体栈（系统字体）===== */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+               "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+
+  /* ===== 布局尺寸 ===== */
+  --shell-max: 480px;        /* app-shell 最大宽度 */
+  --header-height: 52px;     /* 顶栏高度 */
+  --tabbar-height: 64px;     /* 底部 Tab 高度（不含安全区） */
+  --logpanel-height: 240px;  /* 日志面板滚动区高度 */
+
+  /* ===== 阴影 ===== */
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-float: 0 8px 24px rgba(15, 23, 42, .16);
+}
+
+/* ---------- 基础重置 ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  color: var(--text-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
+[hidden] { display: none !important; }
+
+/* ---------- 桌面端：手机框式外观 ---------- */
+.desktop-note {
+  display: none;
+  position: fixed; bottom: 12px; left: 0; right: 0;
+  text-align: center; font-size: var(--font-xs); color: var(--text-3);
+  z-index: 1;
+}
+@media (min-width: 700px) {
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #e6ecf7 0%, #eef1f6 55%, #e8ebf1 100%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .app-shell {
+    height: 844px;
+    max-height: calc(100vh - 48px);
+    border-radius: 32px;
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 24px 64px rgba(15, 23, 42, .18);
+  }
+  .desktop-note { display: block; }
+}
+
+/* ---------- app-shell（移动端全屏，桌面端居中手机框）---------- */
+.app-shell {
+  width: 100%;
+  max-width: var(--shell-max);
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 顶栏 ---------- */
+.app-header {
+  height: var(--header-height);
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+.app-title { font-size: var(--font-lg); font-weight: 700; }
+.device-chip {
+  margin-left: auto;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  background: var(--brand-weak); color: var(--brand);
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.device-chip.unpaired { background: var(--state-idle-weak); color: var(--state-idle-text); }
+
+/* ---------- 页面容器 + 底部 Tab ---------- */
+.pages { flex: 1; position: relative; overflow: hidden; }
+.page {
+  position: absolute; inset: 0;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: var(--space-4) var(--space-4)
+           calc(var(--tabbar-height) + env(safe-area-inset-bottom) + 24px);
+  display: none;
+}
+.page.active { display: block; animation: pageIn .18s ease-out; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.tabbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
+  height: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  background: rgba(255, 255, 255, .94);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+}
+.tab {
+  flex: 1; min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: none; background: none;
+  font-size: 11px; color: var(--text-2);
+  transition: color .15s;
+}
+.tab .tab-icon { font-size: 20px; line-height: 1; }
+.tab.active { color: var(--brand); font-weight: 600; }
+
+/* ---------- 通用卡片 / 标题 / 徽章 ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid rgba(229, 231, 235, .6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.sec-title {
+  font-size: var(--font-sm); font-weight: 600; color: var(--text-2);
+  letter-spacing: .04em;
+  margin: var(--space-4) 4px var(--space-2);
+}
+.badge {
+  display: inline-block; flex-shrink: 0;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+/* 7 态徽章：弱底 + 深字（token 一一对应） */
+.b-idle           { background: var(--state-idle-weak);           color: var(--state-idle-text); }
+.b-running        { background: var(--state-running-weak);        color: var(--state-running-text); }
+.b-completing     { background: var(--state-completing-weak);     color: var(--state-completing-text); }
+.b-done           { background: var(--state-done-weak);           color: var(--state-done-text); }
+.b-failed         { background: var(--state-failed-weak);         color: var(--state-failed-text); }
+.b-timed_out      { background: var(--state-timed-out-weak);      color: var(--state-timed-out-text); }
+.b-aborted        { background: var(--state-aborted-weak);        color: var(--state-aborted-text); }
+.b-abnormal_exit  { background: var(--state-abnormal-exit-weak);  color: var(--state-abnormal-exit-text); }
+
+/* ---------- 按钮（触控目标 ≥44px，active 缩放反馈）---------- */
+.btn {
+  min-height: 44px;
+  border: none; border-radius: var(--radius-md);
+  font-size: var(--font-md); font-weight: 600;
+  padding: 0 var(--space-4);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  transition: transform .06s, background .15s, opacity .15s, box-shadow .3s;
+  user-select: none; -webkit-user-select: none;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-primary:active:not(:disabled) { background: var(--brand-pressed); }
+.btn-secondary { background: #eef1f5; color: var(--text-1); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:active:not(:disabled) { background: var(--danger-pressed); }
+.btn-danger-outline { background: var(--surface); color: var(--danger); border: 1.5px solid var(--danger); }
+.btn-danger-outline:active:not(:disabled) { background: var(--danger-weak); }
+.btn-block { width: 100%; }
+/* completing 反悔窗口：中止按钮脉冲提醒 */
+.btn-attention { animation: attn 1s ease-in-out infinite; }
+@keyframes attn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .45); }
+  50%      { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+}
+
+/* ---------- 加载 spinner（触发按钮用）---------- */
+.spinner {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: #fff; border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 骨架屏（页面切换假 loading）---------- */
+.sk-wrap { display: none; }
+.sk-block {
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  background: linear-gradient(90deg, #e9edf2 25%, #f5f7fa 37%, #e9edf2 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+/* ============================================================
+   ① 状态页
+   ============================================================ */
+/* 大号状态指示卡 */
+.status-hero { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-5); }
+.dot {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  background: var(--dot, var(--state-idle));
+  transition: background .3s;
+}
+/* 呼吸动画：running 黄 / completing 蓝（光晕用配套 --glow token） */
+.dot.breathe { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 var(--glow, transparent); transform: scale(1); }
+  50%      { box-shadow: 0 0 0 10px transparent; transform: scale(1.1); }
+}
+.dot.s-idle       { --dot: var(--state-idle); }
+.dot.s-running    { --dot: var(--state-running);    --glow: var(--glow-running); }
+.dot.s-completing { --dot: var(--state-completing); --glow: var(--glow-completing); }
+.dot.s-done       { --dot: var(--state-done); }
+.dot.s-failed     { --dot: var(--state-failed); }
+.dot.s-timed-out  { --dot: var(--state-timed-out); }
+.dot.s-aborted    { --dot: var(--state-aborted); }
+.dot.s-abnormal   { --dot: var(--state-abnormal-exit); }
+.hero-main { flex: 1; min-width: 0; }
+.hero-state { font-size: var(--font-2xl); font-weight: 700; line-height: 1.2; }
+.hero-sub { font-size: var(--font-sm); color: var(--text-2); margin-top: 2px; }
+.hero-timer {
+  font-family: var(--font-mono); font-size: var(--font-md);
+  color: var(--text-2); text-align: right; white-space: nowrap;
+}
+
+/* 空闲占位 */
+.empty-hint { text-align: center; color: var(--text-3); font-size: var(--font-sm); padding: var(--space-5) 0; }
+
+/* 当前任务卡 */
+.cj-name { font-size: var(--font-lg); font-weight: 700; margin: 2px 0 6px; }
+.cj-meta { font-size: var(--font-xs); color: var(--text-2); margin-top: 6px; font-family: var(--font-mono); }
+
+/* 分组链 pill（任务卡/当前任务卡共用） */
+.groups { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.g-pill {
+  font-size: var(--font-xs); padding: 2px 8px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+}
+.g-pill.last { background: var(--info-weak); color: #1d4ed8; border-color: #bfdbfe; font-weight: 600; }
+.g-arrow { color: var(--text-3); font-size: 11px; }
+
+/* 属性 pill（⏱ 时长 / 收尾动作） */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--font-xs); font-weight: 600;
+  padding: 4px 10px; border-radius: var(--radius-sm);
+}
+.pill-time { background: var(--info-weak); color: #1d4ed8; }
+.pill-after { background: var(--success-weak); color: #15803d; }
+.tc-props { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ---------- 实时日志面板（深色）---------- */
+.log-panel {
+  position: relative;
+  background: var(--log-bg);
+  border: 1px solid var(--log-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+}
+.log-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: var(--log-head-bg);
+  border-bottom: 1px solid var(--log-border);
+  font-size: var(--font-xs); color: var(--log-text-dim);
+}
+.log-job { font-family: var(--font-mono); color: var(--log-text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  padding: 1px 8px; border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, .06); color: var(--log-text-dim);
+}
+/* WS 连接状态点：connecting 黄闪 / connected 绿 / error 红 / closed 灰 */
+.ws-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--state-idle);
+}
+.ws-dot.ws-connecting { background: var(--state-running); animation: blink 1s infinite; }
+.ws-dot.ws-connected  { background: var(--state-done); }
+.ws-dot.ws-error      { background: var(--log-error); }
+.ws-dot.ws-closed     { background: var(--state-idle); }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+.log-body {
+  height: var(--logpanel-height);
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px; line-height: 1.6;
+  color: var(--log-text);
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-line { display: block; padding: 1px 0; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+.log-line.kw  { color: var(--log-keyword); font-weight: 700; }
+.log-line.err { color: var(--log-error); }
+.log-line.sys { color: var(--log-sys); }
+/* 上滑暂停跟随时的“回到底部”悬浮 pill（视觉小巧，::after 外扩命中区至 ≥44px） */
+.log-jump {
+  position: absolute; right: 10px; bottom: 10px;
+  border: none; border-radius: var(--radius-full);
+  padding: 6px 12px; min-height: 0;
+  font-size: var(--font-xs); font-weight: 600;
+  background: rgba(255, 255, 255, .12); color: #fff;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.log-jump::after { content: ''; position: absolute; inset: -8px; }
+
+/* 主操作区：中止 + 强制清理 */
+.action-row { display: flex; gap: var(--space-3); }
+.action-row .btn { flex: 1; }
+
+/* ============================================================
+   ② 任务页
+   ============================================================ */
+.task-card .tc-head { display: flex; align-items: center; gap: var(--space-3); }
+.tc-name { flex: 1; min-width: 0; font-size: var(--font-lg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-card .groups { margin-top: 8px; }
+.tc-run { min-width: 112px; flex-shrink: 0; }
+.tc-run.btn-secondary { font-size: var(--font-sm); }
+
+/* ============================================================
+   ③ 历史页
+   ============================================================ */
+.chip-row { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
+.chip {
+  position: relative;
+  min-height: 36px;
+  padding: 8px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--surface); color: var(--text-2);
+  font-size: var(--font-sm); font-weight: 500;
+  transition: all .15s;
+}
+/* 扩大触控热区到 ≥44px（视觉 36px，命中区域外扩 4px） */
+.chip::after { content: ''; position: absolute; inset: -4px; }
+.chip.active { background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.hist-card .hc-row { display: flex; align-items: center; gap: var(--space-2); }
+.hc-name { flex: 1; min-width: 0; font-size: var(--font-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-dur { font-family: var(--font-mono); font-size: var(--font-sm); color: var(--text-2); flex-shrink: 0; }
+.hc-times { font-size: var(--font-xs); color: var(--text-3); margin-top: 6px; }
+
+/* ============================================================
+   ④ 设置页
+   ============================================================ */
+.pair-row { display: flex; align-items: center; gap: var(--space-3); }
+.pair-info { flex: 1; min-width: 0; }
+.pair-host { font-size: var(--font-md); font-weight: 700; }
+.pair-sub { font-size: var(--font-xs); color: var(--text-2); margin-top: 2px; font-family: var(--font-mono); }
+
+.scan-progress {
+  height: 8px; border-radius: var(--radius-full);
+  background: var(--state-idle-weak); overflow: hidden;
+  margin: var(--space-3) 0 6px;
+}
+.scan-progress-bar {
+  height: 100%; width: 0%;
+  background: var(--brand); border-radius: var(--radius-full);
+  transition: width .3s ease;
+}
+.scan-stat { font-size: var(--font-xs); color: var(--text-3); margin-bottom: var(--space-2); }
+.subnet-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); font-size: var(--font-sm);
+}
+.subnet-row code { font-family: var(--font-mono); font-size: var(--font-xs); flex: 1; }
+.subnet-row .st { font-size: var(--font-xs); color: var(--text-3); }
+.subnet-row .st.ok { color: var(--success); font-weight: 600; }
+.subnet-row .st.none { color: var(--text-3); }
+.subnet-row .st.doing { color: var(--brand); }
+.dev-card { margin-top: var(--space-3); }
+
+.field-row { display: flex; gap: var(--space-2); }
+.field-row input {
+  flex: 1; min-width: 0; min-height: 44px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  padding: 0 12px; font-size: var(--font-base);
+  font-family: var(--font-mono);
+  background: var(--surface); color: var(--text-1);
+  outline: none;
+}
+.field-row input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-weak); }
+.hint { font-size: var(--font-xs); color: var(--text-3); margin-top: 6px; line-height: 1.5; }
+
+/* 危险区（红描边按钮列表） */
+.danger-card { border: 1px solid var(--danger-weak); }
+.danger-item {
+  width: 100%; min-height: 48px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface); border: none;
+  border-top: 1px solid var(--danger-weak);
+  padding: 0 4px; font-size: var(--font-base); font-weight: 500;
+  color: var(--danger); text-align: left;
+}
+.danger-item:first-of-type { border-top: none; }
+.danger-item small { display: block; font-size: var(--font-xs); color: var(--text-3); font-weight: 400; margin-top: 2px; }
+
+/* ============================================================
+   全局：Toast（顶部滑入淡出）+ 确认弹窗
+   ============================================================ */
+.toast-wrap {
+  position: absolute; top: calc(var(--header-height) + 8px);
+  left: 0; right: 0; z-index: 60;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  pointer-events: none;
+}
+.toast {
+  max-width: 86%;
+  background: rgba(17, 24, 39, .95); color: #fff;
+  font-size: var(--font-sm); font-weight: 500; line-height: 1.4;
+  padding: 10px 16px; border-radius: var(--radius-full);
+  box-shadow: var(--shadow-float);
+  display: flex; align-items: center; gap: 8px;
+  animation: toastIn .25s ease-out;
+  transition: opacity .3s, transform .3s;
+}
+.toast.out { opacity: 0; transform: translateY(-8px); }
+.toast::before { content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.toast.t-success::before { background: var(--state-done); }
+.toast.t-error::before   { background: var(--log-error); }
+.toast.t-info::before    { background: var(--brand); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+
+.modal-mask {
+  position: absolute; inset: 0; z-index: 80;
+  background: rgba(15, 23, 42, .45);
+  display: none; align-items: center; justify-content: center;
+  padding: var(--space-6);
+}
+.modal-mask.show { display: flex; animation: fadeIn .15s ease-out; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: 100%; max-width: 320px;
+  background: var(--surface); border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-float);
+  animation: popIn .18s ease-out;
+}
+@keyframes popIn { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.m-title { font-size: var(--font-lg); font-weight: 700; margin-bottom: var(--space-2); }
+.m-body { font-size: var(--font-base); color: var(--text-2); line-height: 1.6; margin-bottom: var(--space-5); }
+.m-actions { display: flex; gap: var(--space-3); }
+.m-actions .btn { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- 桌面端演示提示（仅 ≥700px 显示） -->
+<div class="desktop-note">BetterGI Trigger · 移动端交互原型 · 建议以 Chrome DevTools 390×844 视口演示</div>
+
+<div class="app-shell">
+
+  <!-- ===== 顶栏 ===== -->
+  <header class="app-header">
+    <div class="app-title">BetterGI Trigger</div>
+    <div class="device-chip" id="device-chip">DESKTOP-GAMING</div>
+  </header>
+
+  <!-- ===== 页面容器（4 个 Tab 页） ===== -->
+  <main class="pages">
+
+    <!-- ============ ① 状态页（首页） ============ -->
+    <section class="page active" id="page-status">
+      <!-- 骨架屏（页面切换时短暂显示） -->
+      <div class="sk-wrap" data-sk>
+        <div class="sk-block" style="height:92px"></div>
+        <div class="sk-block" style="height:110px"></div>
+        <div class="sk-block" style="height:300px"></div>
+      </div>
+      <div data-content>
+        <!-- 大号状态指示：圆点 + 中文状态 + 走秒计时 -->
+        <div class="card status-hero">
+          <div class="dot s-idle" id="status-dot"></div>
+          <div class="hero-main">
+            <div class="hero-state" id="status-text">空闲</div>
+            <div class="hero-sub" id="status-sub">等待任务触发</div>
+          </div>
+          <div class="hero-timer" id="status-timer"></div>
+        </div>
+
+        <!-- 空闲占位提示 -->
+        <div class="card" id="status-empty"><div class="empty-hint">当前没有运行中的任务<br>去「任务」页选择任务，点击 ▶ 执行</div></div>
+
+        <!-- 当前任务卡（运行/收尾时显示） -->
+        <div class="card" id="cj-card" hidden>
+          <div class="sec-title" style="margin:0 0 4px;">当前任务</div>
+          <div class="cj-name" id="cj-name"></div>
+          <div class="groups" id="cj-groups"></div>
+          <div class="cj-meta" id="cj-meta"></div>
+        </div>
+
+        <!-- 实时日志面板（深色，等宽字体，自动滚动） -->
+        <div class="log-panel" id="log-panel" hidden>
+          <div class="log-head">
+            <span class="ws-dot ws-connecting" id="ws-dot"></span>
+            <span id="ws-text">连接中…</span>
+            <span class="log-job" id="log-job"></span>
+            <span class="log-count" id="log-count">0 行</span>
+          </div>
+          <div class="log-body" id="log-body"></div>
+          <!-- 上滑暂停跟随后的“回到底部”按钮 -->
+          <button class="log-jump" id="log-jump" hidden>↓ 回到底部</button>
+        </div>
+
+        <!-- 主操作区：中止 + 强制清理 -->
+        <div class="action-row">
+          <button class="btn btn-secondary" id="btn-abort" disabled>⏹ 中止</button>
+          <button class="btn btn-danger" id="btn-cleanup">🧹 强制清理</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ② 任务页 ============ -->
+    <section class="page" id="page-tasks">
+      <div class="sk-wrap" data-sk>
+        <div class="sk-block" style="height:120px"></div>
+        <div class="sk-block" style="height:120px"></div>
+        <div class="sk-block" style="height:120px"></div>
+      </div>
+      <div data-content>
+        <!-- 任务卡列表（由 renderTasks 生成） -->
+        <div id="task-list"></div>
+      </div>
+    </section>
+
+    <!-- ============ ③ 历史页 ============ -->
+    <section class="page" id="page-history">
+      <div class="sk-wrap" data-sk>
+        <div class="sk-block" style="height:40px;width:60%"></div>
+        <div class="sk-block" style="height:72px"></div>
+        <div class="sk-block" style="height:72px"></div>
+        <div class="sk-block" style="height:72px"></div>
+      </div>
+      <div data-content>
+        <!-- 过滤 chip：全部 / 进行中 / 已完成 -->
+        <div class="chip-row" id="hist-chips">
+          <button class="chip active" data-f="all">全部</button>
+          <button class="chip" data-f="active">进行中</button>
+          <button class="chip" data-f="finished">已完成</button>
+        </div>
+        <!-- 历史记录卡列表（7 态徽章全覆盖） -->
+        <div id="hist-list"></div>
+      </div>
+    </section>
+
+    <!-- ============ ④ 设置页 ============ -->
+    <section class="page" id="page-settings">
+      <div class="sk-wrap" data-sk>
+        <div class="sk-block" style="height:84px"></div>
+        <div class="sk-block" style="height:180px"></div>
+        <div class="sk-block" style="height:110px"></div>
+      </div>
+      <div data-content>
+        <!-- 配对状态卡 -->
+        <div class="card" id="pair-card"></div>
+
+        <!-- 扫描区：进度条 + 子网列表 -->
+        <div class="sec-title">扫描设备</div>
+        <div class="card">
+          <button class="btn btn-primary btn-block" id="btn-scan">🔍 开始扫描</button>
+          <div class="scan-progress" id="scan-progress-wrap" hidden>
+            <div class="scan-progress-bar" id="scan-progress-bar"></div>
+          </div>
+          <div class="scan-stat" id="scan-stat"></div>
+          <div id="scan-subnets"></div>
+          <div id="scan-result"></div>
+        </div>
+
+        <!-- WOL 网络唤醒区 -->
+        <div class="sec-title">WOL 网络唤醒</div>
+        <div class="card">
+          <div class="field-row">
+            <input id="wol-mac" type="text" placeholder="AA-BB-CC-DD-EE-FF" autocomplete="off" spellcheck="false">
+            <button class="btn btn-primary" id="btn-wol">唤醒</button>
+          </div>
+          <div class="hint">向 Windows 主机网卡发送 Magic Packet，用于任务执行前远程开机。</div>
+        </div>
+
+        <!-- 危险区 -->
+        <div class="sec-title">危险区</div>
+        <div class="card danger-card">
+          <button class="danger-item" id="danger-cleanup">
+            <span>🧹 强制清理<small>终止当前任务并重置监听器运行状态</small></span>
+            <span>›</span>
+          </button>
+          <button class="danger-item" id="danger-unpair">
+            <span>🔌 取消配对<small>断开与当前 Windows 主机的配对</small></span>
+            <span>›</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== 底部 Tab 导航（拇指友好：图标 + 文字） ===== -->
+  <nav class="tabbar">
+    <button class="tab active" data-tab="status"><span class="tab-icon">📡</span><span>状态</span></button>
+    <button class="tab" data-tab="tasks"><span class="tab-icon">⚡</span><span>任务</span></button>
+    <button class="tab" data-tab="history"><span class="tab-icon">📜</span><span>历史</span></button>
+    <button class="tab" data-tab="settings"><span class="tab-icon">⚙️</span><span>设置</span></button>
+  </nav>
+
+  <!-- ===== Toast 容器（顶部滑入淡出，替代 alert） ===== -->
+  <div class="toast-wrap" id="toast-wrap"></div>
+
+  <!-- ===== 确认弹窗（强制清理 / 取消配对） ===== -->
+  <div class="modal-mask" id="confirm-mask">
+    <div class="modal">
+      <div class="m-title" id="m-title"></div>
+      <div class="m-body" id="m-body"></div>
+      <div class="m-actions">
+        <button class="btn btn-secondary" id="m-cancel">取消</button>
+        <button class="btn btn-danger" id="m-ok">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================
+ * BetterGI Trigger · Wave 1 交互原型（纯 mock，无任何网络请求）
+ * 区块目录：
+ *   1. Mock 数据 & 全局状态
+ *   2. 工具函数
+ *   3. Toast / 确认弹窗
+ *   4. Tab 切换 + 骨架屏
+ *   5. 状态页（状态机渲染 / 计时 / 日志面板）
+ *   6. 任务页（触发流转 → running → completing → done / aborted）
+ *   7. 历史页（7 态徽章 + 过滤 chip）
+ *   8. 设置页（配对 / 扫描 / WOL / 危险区）
+ * ============================================================ */
+
+/* ============ 1. Mock 数据 & 全局状态 ============ */
+
+// 后端 7 态 + 前端 idle 占位态：文案 / 圆点 class / 是否呼吸（与 gui-design.md 映射表一致）
+const STATE_MAP = {
+  idle:          { zh: '空闲',         dot: 's-idle',       breathe: false },
+  running:       { zh: '运行中',       dot: 's-running',    breathe: true  },
+  completing:    { zh: '收尾中',       dot: 's-completing', breathe: true  },
+  done:          { zh: '已完成',       dot: 's-done',       breathe: false },
+  abnormal_exit: { zh: '游戏异常退出', dot: 's-abnormal',   breathe: false },
+  timed_out:     { zh: '超时',         dot: 's-timed-out',  breathe: false },
+  failed:        { zh: '失败',         dot: 's-failed',     breathe: false },
+  aborted:       { zh: '已中止',       dot: 's-aborted',    breathe: false },
+};
+const TERMINAL = ['done', 'abnormal_exit', 'timed_out', 'failed', 'aborted'];
+const TRIGGERING_ZH = '触发中…';
+
+// 任务列表 mock（分组链 / ⏱ 执行时长 / 收尾动作）
+const MOCK_TASKS = [
+  { id: 't1', name: '日常一条龙', groups: ['日常一条龙', '每日委托', '领取奖励', '关闭游戏'], timeoutMin: 90,  afterDone: 'sleep' },
+  { id: 't2', name: '快速委托',   groups: ['日常一条龙', '每日委托'],                        timeoutMin: 30,  afterDone: 'none'  },
+  { id: 't3', name: '无尽采矿',   groups: ['日常一条龙', '采矿'],                            timeoutMin: 120, afterDone: 'sleep' },
+  { id: 't4', name: '尘歌壶助力', groups: ['尘歌壶', '好友助力'],                            timeoutMin: 20,  afterDone: 'lock'  },
+];
+const AFTER_LABEL = { sleep: '💤 休眠', shutdown: '⏻ 关机', lock: '🔒 锁屏', none: '⏸ 不操作' };
+
+// 历史 mock：故意包含 7 态各一条，验证徽章全覆盖（running / completing / 超时 / 中止等）
+let MOCK_HISTORY = [
+  { name: '日常一条龙', state: 'running',       start: '09-04 19:31', end: '—',          dur: '进行中…' },
+  { name: '每周斗剑',   state: 'completing',    start: '09-04 19:20', end: '—',          dur: '进行中…' },
+  { name: '深境螺旋',   state: 'done',          start: '09-04 12:02', end: '09-04 12:41', dur: '39:12' },
+  { name: '无尽采矿',   state: 'timed_out',     start: '09-03 22:00', end: '09-03 23:30', dur: '90:00' },
+  { name: '尘歌壶助力', state: 'failed',        start: '09-03 20:15', end: '09-03 20:16', dur: '00:48' },
+  { name: '钓鱼自动化', state: 'aborted',       start: '09-03 19:05', end: '09-03 19:22', dur: '17:03' },
+  { name: '快速委托',   state: 'abnormal_exit', start: '09-02 08:30', end: '09-02 08:44', dur: '14:21' },
+];
+
+// 设置页 mock
+let paired = true;
+const DEVICE = { host: 'DESKTOP-GAMING', ip: '192.168.31.43', port: 8766, ver: 'v1.2.0' };
+const SCAN_SUBNETS = [
+  { cidr: '192.168.31.0/24', found: 1 },
+  { cidr: '192.168.1.0/24',  found: 0 },
+  { cidr: '10.0.0.0/24',     found: 0 },
+];
+
+// 单活 job（模拟后端全局唯一运行任务）
+// state: triggering → running → completing → done；任意 active 态可中止为 aborted
+let job = null;
+
+// 运行期日志脚本：前 12 条为 running 阶段（含 1 条红色异常 + 1 条黄色“任务结束”关键字），后 3 条为 completing 阶段
+const LOG_SCRIPT = [
+  '[任务] 「日常一条龙」开始执行',
+  '[系统] 启动 BetterGI 主进程…',
+  '[系统] 已聚焦原神窗口 (UnityWndClass)',
+  '[调度] ▶ 步骤 1/4：领取每日奖励',
+  '[调度] ✔ 派遣奖励领取完成',
+  '[调度] ▶ 步骤 2/4：洞天宝钱收取',
+  '[识别] ⚠ 图像识别异常，自动重试 1/3',
+  '[调度] ✔ 洞天宝钱收取完成',
+  '[调度] ▶ 步骤 3/4：每日委托-战斗',
+  '[战斗] 队伍配置：雷神 / 班尼特 / 香菱 / 行秋',
+  '[调度] ✔ 每日委托完成',
+  '★ 任务结束',
+  '[系统] 命中完成判定：日志关键字（log_keyword）',
+  '[系统] 执行收尾动作：休眠',
+  '[系统] BetterGI 进程已退出',
+];
+
+/* ============ 2. 工具函数 ============ */
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// 秒 → mm:ss（超过 1 小时分钟位继续累加，如 90:00）
+function mmss(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+// 当前时刻 HH:MM:SS（日志行前缀）
+function nowHMS() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
+// 毫秒 → "09-04 19:31"（历史记录用）
+function fmtDT(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// mock job_id：j-月日-时分
+function genJobId() {
+  const d = new Date(); const p = (n) => String(n).padStart(2, '0');
+  return `j-${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+// 日志行分类：关键字黄 / 异常红 / 系统青（与线上 GUI 正则一致）
+function classifyLog(t) {
+  if (/任务结束/.test(t)) return 'kw';
+  if (/⚠|失败|异常|错误|error|闪退|fatal/i.test(t)) return 'err';
+  if (/^\[系统\]/.test(t)) return 'sys';
+  return '';
+}
+
+/* ============ 3. Toast / 确认弹窗 ============ */
+
+// Toast：顶部滑入，2.2s 后淡出；type: success / error / info
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = 'toast t-' + type;
+  el.textContent = msg;
+  $('toast-wrap').appendChild(el);
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 320);
+  }, 2200);
+}
+
+// 确认弹窗：Promise 化，resolve(true/false)
+let confirmResolve = null;
+function showConfirm(title, body, okText = '确认') {
+  $('m-title').textContent = title;
+  $('m-body').textContent = body;
+  $('m-ok').textContent = okText;
+  $('confirm-mask').classList.add('show');
+  return new Promise(res => { confirmResolve = res; });
+}
+function closeConfirm(v) {
+  $('confirm-mask').classList.remove('show');
+  if (confirmResolve) { confirmResolve(v); confirmResolve = null; }
+}
+$('m-ok').addEventListener('click', () => closeConfirm(true));
+$('m-cancel').addEventListener('click', () => closeConfirm(false));
+$('confirm-mask').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeConfirm(false); });
+
+/* ============ 4. Tab 切换 + 骨架屏 ============ */
+const skTimers = {};
+function switchTab(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  const page = $('page-' + name);
+  page.classList.add('active');
+  page.scrollTop = 0;
+  // 骨架屏：每次切换显示 300ms 假 loading
+  const sk = page.querySelector('[data-sk]');
+  const ct = page.querySelector('[data-content]');
+  sk.style.display = 'block';
+  ct.style.display = 'none';
+  clearTimeout(skTimers[name]);
+  skTimers[name] = setTimeout(() => {
+    sk.style.display = 'none';
+    ct.style.display = 'block';
+  }, 300);
+}
+document.querySelectorAll('.tab').forEach(t =>
+  t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+/* ============ 5. 状态页 ============ */
+
+// 计时走秒（running / completing 期间每 500ms 刷新）
+setInterval(() => {
+  if (job && (job.state === 'running' || job.state === 'completing') && job.startedAt) {
+    $('status-timer').textContent = '已运行 ' + mmss((Date.now() - job.startedAt) / 1000);
+  }
+}, 500);
+
+// 状态页整体渲染（状态机唯一出口，任何状态变化后调用）
+function renderStatus() {
+  const st = job ? job.state : 'idle';
+  const meta = STATE_MAP[st] || STATE_MAP.idle;
+  const active = job && !TERMINAL.includes(st) && st !== 'idle'; // triggering/running/completing
+
+  // 圆点 + 呼吸动画
+  $('status-dot').className = 'dot ' + meta.dot + (meta.breathe ? ' breathe' : '');
+  $('status-text').textContent = st === 'triggering' ? TRIGGERING_ZH : meta.zh;
+
+  // 副标题
+  let sub = '等待任务触发';
+  if (st === 'triggering') sub = '正在向 Windows 监听器发送触发请求…';
+  else if (st === 'running') sub = job.task.name + ' · 可随时中止';
+  else if (st === 'completing') sub = '命中完成判定，正在收尾（反悔窗口）';
+  else if (TERMINAL.includes(st)) sub = job.task.name;
+  $('status-sub').textContent = sub;
+
+  // 计时（终态冻结为总用时）
+  if (st === 'running' || st === 'completing') {
+    $('status-timer').textContent = '已运行 ' + mmss((Date.now() - job.startedAt) / 1000);
+  } else if (TERMINAL.includes(st)) {
+    $('status-timer').textContent = '总用时 ' + mmss(job.elapsedSec);
+  } else {
+    $('status-timer').textContent = '';
+  }
+
+  // 空闲占位 / 当前任务卡
+  $('status-empty').hidden = !!job;
+  $('cj-card').hidden = !active;
+  if (active) {
+    $('cj-name').textContent = job.task.name;
+    const groups = job.task.groups;
+    $('cj-groups').innerHTML = groups.map((g, i) =>
+      `<span class="g-pill${i === groups.length - 1 ? ' last' : ''}">${g}</span>`)
+      .join('<span class="g-arrow">→</span>');
+    $('cj-meta').textContent = `job #${job.jobId} · 收尾动作 ${AFTER_LABEL[job.task.afterDone]}`;
+  }
+
+  // 日志面板：有 job 即显示（终态保留最后一屏日志）
+  $('log-panel').hidden = !job;
+
+  // 中止按钮：running/completing 可用，否则禁用置灰；completing 时脉冲提醒（反悔窗口）
+  $('btn-abort').disabled = !(st === 'running' || st === 'completing');
+  $('btn-abort').classList.toggle('btn-attention', st === 'completing');
+
+  renderTasks(); // 任务按钮与全局运行态联动
+}
+
+// —— 日志面板 ——
+let scrollPaused = false; // 用户上滑时暂停自动跟随
+let liveLines = 0;
+
+// WS 连接状态点：connecting 黄闪 / connected 绿 / error 红 / closed 灰
+function setWs(state, text) {
+  $('ws-dot').className = 'ws-dot ws-' + state;
+  $('ws-text').textContent = text;
+}
+
+// 重置日志面板（新 job 开始时）
+function logReset(jobId) {
+  liveLines = 0;
+  scrollPaused = false;
+  $('log-job').textContent = '#' + jobId;
+  $('log-count').textContent = '0 行';
+  $('log-body').innerHTML = '';
+  $('log-jump').hidden = true;
+  setWs('connecting', '连接中…');
+}
+
+// 追加一行日志：缓冲上限 400 行，未暂停时自动滚到底
+function logAppend(text, cls) {
+  const body = $('log-body');
+  const line = document.createElement('span');
+  line.className = 'log-line' + (cls ? ' ' + cls : '');
+  line.textContent = text;
+  body.appendChild(line);
+  liveLines++;
+  while (body.children.length > 400) body.removeChild(body.firstChild);
+  $('log-count').textContent = liveLines + ' 行';
+  if (!scrollPaused) body.scrollTop = body.scrollHeight;
+  else $('log-jump').hidden = false;
+}
+
+// 滚动暂停逻辑：距底部 > 40px 视为用户上滑，暂停跟随
+$('log-body').addEventListener('scroll', (e) => {
+  const el = e.target;
+  scrollPaused = (el.scrollHeight - el.scrollTop - el.clientHeight) > 40;
+  if (!scrollPaused) $('log-jump').hidden = true;
+});
+// “回到底部”：恢复自动跟随
+$('log-jump').addEventListener('click', () => {
+  const body = $('log-body');
+  body.scrollTop = body.scrollHeight;
+  scrollPaused = false;
+  $('log-jump').hidden = true;
+});
+
+// —— 中止：running/completing 全程可打断为 aborted ——
+$('btn-abort').addEventListener('click', () => {
+  if (!job || !(job.state === 'running' || job.state === 'completing')) return;
+  clearJobTimers();
+  job.state = 'aborted';
+  job.elapsedSec = (Date.now() - job.startedAt) / 1000;
+  setWs('closed', '已结束');
+  logAppend(`[${nowHMS()}] [系统] ⚠ 已发送中止请求，任务中止（aborted）`, 'err');
+  toast('任务已中止', 'info');
+  pushHistory('aborted');
+  renderStatus();
+});
+
+// —— 强制清理：确认弹窗 → 清空运行态 ——
+$('btn-cleanup').addEventListener('click', async () => {
+  const ok = await showConfirm('强制清理',
+    '将终止当前任务并重置监听器运行状态，可能造成任务中断。仅建议任务卡死时使用。',
+    '强制清理');
+  if (!ok) return;
+  if (job) clearJobTimers();
+  job = null;
+  renderStatus();
+  toast('已发送强制清理指令（mock）', 'success');
+});
+
+/* ============ 6. 任务页（触发流转） ============ */
+
+function clearJobTimers() {
+  if (!job) return;
+  job.timers.forEach(id => { clearTimeout(id); clearInterval(id); });
+  job.timers = [];
+}
+
+// 触发任务：单活互斥 → 按钮立即 spinner → 跳状态页 → 1.5s 后 running
+function triggerTask(taskId) {
+  if (job && !TERMINAL.includes(job.state)) return; // 已有任务运行，忽略（按钮本身已禁用）
+  const task = MOCK_TASKS.find(t => t.id === taskId);
+  job = { task, jobId: genJobId(), state: 'triggering', startedAt: 0, elapsedSec: 0, timers: [], lineIdx: 0 };
+
+  // 日志面板重置 + WS 连接中
+  logReset(job.jobId);
+  logAppend(`[${nowHMS()}] [系统] 正在连接实时日志通道…`, 'sys');
+  renderStatus();
+  switchTab('status');
+
+  // 模拟 1.5s 触发请求（期间按钮 spinner、全局禁用）
+  job.timers.push(setTimeout(() => {
+    job.state = 'running';
+    job.startedAt = Date.now();
+    setWs('connected', '实时同步中');
+    renderStatus();
+
+    // 日志逐行流入：每 800ms 一条（含“任务结束”黄色关键字行）
+    const lineTimer = setInterval(() => {
+      if (job.lineIdx < LOG_SCRIPT.length) {
+        const raw = LOG_SCRIPT[job.lineIdx++];
+        logAppend(`[${nowHMS()}] ${raw}`, classifyLog(raw));
+      }
+    }, 800);
+    job.timers.push(lineTimer);
+
+    // 10s 后自动进入 completing（收尾反悔窗口）
+    job.timers.push(setTimeout(() => {
+      job.state = 'completing';
+      renderStatus();
+      // 3s 后 done：绿色 + toast“任务完成，将休眠”
+      job.timers.push(setTimeout(() => finishJob('done'), 3000));
+    }, 10000));
+  }, 1500));
+}
+
+// 终态收尾：冻结计时、关 WS、写历史、弹 toast
+function finishJob(state) {
+  clearJobTimers();
+  job.state = state;
+  job.elapsedSec = (Date.now() - job.startedAt) / 1000;
+  setWs('closed', '已结束');
+  logAppend(`[${nowHMS()}] [系统] 连接关闭，本次运行结束`, 'sys');
+  if (state === 'done') toast('任务完成，将休眠', 'success');
+  pushHistory(state);
+  renderStatus();
+}
+
+// 任务卡列表渲染；全局运行态时所有触发按钮禁用
+function renderTasks() {
+  const active = job && !TERMINAL.includes(job.state); // triggering/running/completing
+  $('task-list').innerHTML = MOCK_TASKS.map(t => {
+    let btn;
+    if (active) {
+      if (job.state === 'triggering' && job.task.id === t.id) {
+        // 正在触发的那个：loading spinner 态
+        btn = `<button class="btn btn-primary tc-run" disabled><span class="spinner"></span>触发中</button>`;
+      } else {
+        // 其余按钮：运行中禁用态
+        btn = `<button class="btn btn-secondary tc-run" disabled>运行中，不可触发</button>`;
+      }
+    } else {
+      // 空闲/终态：全部可触发
+      btn = `<button class="btn btn-primary tc-run" data-id="${t.id}">▶ 执行</button>`;
+    }
+    return `
+      <div class="card task-card">
+        <div class="tc-head">
+          <div class="tc-name">${t.name}</div>
+          ${btn}
+        </div>
+        <div class="groups">
+          ${t.groups.map((g, i) => `<span class="g-pill${i === t.groups.length - 1 ? ' last' : ''}">${g}</span>`)
+            .join('<span class="g-arrow">→</span>')}
+        </div>
+        <div class="tc-props">
+          <span class="pill pill-time">⏱ ${t.timeoutMin} 分钟</span>
+          <span class="pill pill-after">${AFTER_LABEL[t.afterDone]}</span>
+        </div>
+      </div>`;
+  }).join('');
+  // 绑定触发事件
+  document.querySelectorAll('#task-list .tc-run[data-id]').forEach(b =>
+    b.addEventListener('click', () => triggerTask(b.dataset.id)));
+}
+
+/* ============ 7. 历史页 ============ */
+let histFilter = 'all'; // all / active / finished
+
+function pushHistory(state) {
+  MOCK_HISTORY.unshift({
+    name: job.task.name,
+    state,
+    start: fmtDT(job.startedAt || Date.now()),
+    end: '—',
+    dur: mmss(job.elapsedSec || 0),
+  });
+  renderHistory();
+}
+
+function renderHistory() {
+  document.querySelectorAll('#hist-chips .chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.f === histFilter));
+  const list = MOCK_HISTORY.filter(r => {
+    if (histFilter === 'active') return r.state === 'running' || r.state === 'completing';
+    if (histFilter === 'finished') return TERMINAL.includes(r.state);
+    return true;
+  });
+  $('hist-list').innerHTML = list.length ? list.map(r => `
+    <div class="card hist-card">
+      <div class="hc-row">
+        <span class="badge b-${r.state}">${STATE_MAP[r.state].zh}</span>
+        <span class="hc-name">${r.name}</span>
+        <span class="hc-dur">${r.dur}</span>
+      </div>
+      <div class="hc-times">开始 ${r.start} · 结束 ${r.end}</div>
+    </div>`).join('')
+    : '<div class="card"><div class="empty-hint">暂无记录</div></div>';
+}
+document.querySelectorAll('#hist-chips .chip').forEach(c =>
+  c.addEventListener('click', () => { histFilter = c.dataset.f; renderHistory(); }));
+
+/* ============ 8. 设置页 ============ */
+
+// —— 配对状态卡 ——
+function renderPairing() {
+  const chip = $('device-chip');
+  if (paired) {
+    chip.textContent = DEVICE.host;
+    chip.classList.remove('unpaired');
+    $('pair-card').innerHTML = `
+      <div class="pair-row">
+        <span class="badge b-done">✅ 已配对</span>
+        <div class="pair-info">
+          <div class="pair-host">${DEVICE.host}</div>
+          <div class="pair-sub">${DEVICE.ip}:${DEVICE.port} · BetterGI ${DEVICE.ver}</div>
+        </div>
+      </div>`;
+  } else {
+    chip.textContent = '未配对';
+    chip.classList.add('unpaired');
+    $('pair-card').innerHTML = `
+      <div class="pair-row">
+        <span class="badge b-idle">⚪ 未配对</span>
+        <div class="pair-info">
+          <div class="pair-host">尚未配对设备</div>
+          <div class="pair-sub">在下方“扫描设备”中发现监听器后即可配对</div>
+        </div>
+      </div>`;
+  }
+}
+
+// —— 扫描区：进度条 + 子网逐个扫描动画（点击触发） ——
+let scanning = false;
+$('btn-scan').addEventListener('click', async () => {
+  if (scanning) return;
+  scanning = true;
+  const btn = $('btn-scan');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>扫描中…';
+  $('scan-progress-wrap').hidden = false;
+  $('scan-result').innerHTML = '';
+
+  // 子网列表初始为“等待”
+  $('scan-subnets').innerHTML = SCAN_SUBNETS.map(s => `
+    <div class="subnet-row" data-cidr="${s.cidr}">
+      <code>${s.cidr}</code><span class="st">等待</span>
+    </div>`).join('');
+
+  const total = SCAN_SUBNETS.length;
+  for (let i = 0; i < total; i++) {
+    const row = $('scan-subnets').children[i];
+    const st = row.querySelector('.st');
+    st.textContent = '扫描中…';
+    st.className = 'st doing';
+    await sleep(900); // 模拟单子网扫描耗时
+    const s = SCAN_SUBNETS[i];
+    if (s.found > 0) { st.textContent = `发现 ${s.found} 台`; st.className = 'st ok'; }
+    else { st.textContent = '无设备'; st.className = 'st none'; }
+    // 总进度 = 已完成子网占比
+    const pct = Math.round(((i + 1) / total) * 100);
+    $('scan-progress-bar').style.width = pct + '%';
+    $('scan-stat').textContent = `已扫描 ${i + 1}/${total} 个子网 · ${pct}%`;
+  }
+
+  // 完成后展示可配对设备卡
+  $('scan-result').innerHTML = `
+    <div class="card dev-card" style="margin-bottom:0;box-shadow:none;border:1px solid var(--border);">
+      <div class="pair-row">
+        <span class="badge b-running">📡 发现设备</span>
+        <div class="pair-info">
+          <div class="pair-host">${DEVICE.host}</div>
+          <div class="pair-sub">${DEVICE.ip}:${DEVICE.port} · ${DEVICE.ver}</div>
+        </div>
+        <button class="btn btn-primary" id="btn-pair" style="padding:0 14px;font-size:var(--font-sm);flex-shrink:0;">配对</button>
+      </div>
+    </div>`;
+  $('btn-pair').addEventListener('click', () => {
+    paired = true;
+    renderPairing();
+    toast(`已配对 ${DEVICE.host}（mock）`, 'success');
+  });
+  toast('扫描完成，发现 1 台设备', 'success');
+  btn.disabled = false;
+  btn.textContent = '🔍 重新扫描';
+  scanning = false;
+});
+
+// —— WOL 唤醒 ——
+$('btn-wol').addEventListener('click', () => {
+  const mac = $('wol-mac').value.trim();
+  if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    toast('MAC 地址格式不正确，示例：AA-BB-CC-DD-EE-FF', 'error');
+    return;
+  }
+  toast(`已发送 Magic Packet → ${mac.toUpperCase()}`, 'success');
+});
+
+// —— 危险区：强制清理（复用状态页逻辑）/ 取消配对 ——
+$('danger-cleanup').addEventListener('click', async () => {
+  const ok = await showConfirm('强制清理',
+    '将终止当前任务并重置监听器运行状态，可能造成任务中断。仅建议任务卡死时使用。',
+    '强制清理');
+  if (!ok) return;
+  if (job) clearJobTimers();
+  job = null;
+  renderStatus();
+  toast('已发送强制清理指令（mock）', 'success');
+});
+$('danger-unpair').addEventListener('click', async () => {
+  const ok = await showConfirm('取消配对',
+    `将断开与 ${DEVICE.host}（${DEVICE.ip}）的配对，触发任务前需重新扫描配对。`,
+    '取消配对');
+  if (!ok) return;
+  paired = false;
+  renderPairing();
+  toast('已取消配对', 'info');
+});
+
+/* ============ 初始化 ============ */
+renderStatus();
+renderPairing();
+renderHistory();
+switchTab('status'); // 首次进入也走一次骨架屏
+</script>
+</body>
+</html>

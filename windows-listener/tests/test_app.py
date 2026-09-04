@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from bgi_trigger.api.app import create_app, AppDeps
 from bgi_trigger.service.auth import AuthState
-from bgi_trigger.core.state import JobStore
+from bgi_trigger.core.state import JobStore, JobState
 from bgi_trigger.core.tasks import TaskRegistry
 from bgi_trigger.core.log_harvester import LogHarvester
 
@@ -356,3 +356,53 @@ def test_keyword_scan_mode_backward_compat():
         assert "任务结束" in line
     finally:
         h.stop()
+
+
+def test_ws_logs_sends_last_frame_when_finished():
+    """任务结束后 WS 应先补发剩余日志行、再推 {"last":True,"state":...} 终止帧。
+
+    前端依赖 last 帧干净收尾（不再依赖轮询终态兜底）。
+    """
+    import time as _time
+    from bgi_trigger.core import launcher as _launcher_mod
+    from bgi_trigger.core.log_harvester import LogHarvester
+
+    jobs = JobStore()
+    launched = {}
+
+    def fake_launch(job, task):
+        # 模拟 Launcher.__call__：注册一个已收割完日志的 harvester
+        h = LogHarvester(job_id=job.id, log_path="C:/nonexistent/x.log")
+        h._finished = True
+        _launcher_mod._harvesters[job.id] = h
+        launched["id"] = job.id
+
+    deps = _deps_with_log(str(_tmp_log_file()), launch=fake_launch)
+    deps.jobs = jobs
+    client = TestClient(create_app(deps))
+    try:
+        r = client.post("/trigger", json={"task_id": "daily"}, headers=AUTH)
+        assert r.status_code == 202
+        job_id = r.json()["job_id"]
+        jobs.finalize(JobState.DONE)  # 置终态（to_dict 需要）
+
+        with client.websocket_connect(f"/ws/logs/{job_id}") as ws:
+            got_last = None
+            for _ in range(5):
+                msg = ws.receive_json()
+                if msg.get("last"):
+                    got_last = msg
+                    break
+        assert got_last is not None, "未收到 last 终止帧"
+        assert got_last["state"]["state"] == "done"
+    finally:
+        with _launcher_mod._harvesters_lock:
+            _launcher_mod._harvesters.pop(launched.get("id"), None)
+
+
+def _tmp_log_file():
+    import tempfile
+    import os
+    f = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+    f.close()
+    return f.name
