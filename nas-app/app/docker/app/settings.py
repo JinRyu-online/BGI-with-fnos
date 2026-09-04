@@ -6,6 +6,7 @@
 配置结构：
   default_target  默认目标监听器 {ip, port, hostname}，扫描配对后写入；未配对时为 null
   api_key         与 Windows 监听器一致的 API 密钥
+  target_mac      目标机器 MAC 地址（Wake-on-LAN 唤醒用；空=未配置）
   scan            扫描相关：subnet(覆盖自动探测的子网,null=自动)、listener_port、diag_ports
   poll            状态轮询：interval_sec
 """
@@ -20,6 +21,7 @@ from pathlib import Path
 DEFAULT_CONFIG: dict = {
     "default_target": None,  # {"ip":..., "port":..., "hostname":...} 或 null
     "api_key": "",
+    "target_mac": "",        # 目标机器 MAC 地址（Wake-on-LAN 唤醒用；空=未配置）
     "scan": {
         "subnet": None,            # null=自动从网卡探测子网；填则覆盖
         "listener_port": 8765,     # 监听器默认端口，扫描时探测此端口

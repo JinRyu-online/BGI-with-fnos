@@ -43,6 +43,7 @@ def test_load_merges_partial_file_with_defaults(tmp_path):
 
 def test_default_config_is_complete():
     # sanity: the shipped defaults cover every key the app reads
-    assert set(DEFAULT_CONFIG.keys()) == {"default_target", "api_key", "scan", "poll"}
+    assert set(DEFAULT_CONFIG.keys()) == {"default_target", "api_key", "target_mac", "scan", "poll"}
     assert "listener_port" in DEFAULT_CONFIG["scan"]
     assert "diag_ports" in DEFAULT_CONFIG["scan"]
+    assert DEFAULT_CONFIG["target_mac"] == ""

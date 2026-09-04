@@ -47,6 +47,10 @@ class FakeClient:
         self._aborted = True
         return {"aborted": True}
 
+    def stop(self):
+        self._stopped = True
+        return {"stopped": True, "killed": ["BetterGI.exe"]}
+
 
 def _make(tmp_path, *, scanner=None, client=None):
     """构造测试 app。client 为 FakeClient 实例，作为 client_factory 的返回。"""
@@ -193,17 +197,67 @@ def test_abort_unpaired_returns_400(tmp_path):
     assert r.status_code == 400
 
 
-def test_discover_key_returns_api_key(tmp_path):
-    """GET /api/discover-key 代理目标监听器的 /key，返回 api_key + hostname。"""
-    import respx
-    import httpx as _httpx
+def test_stop_forwards_to_listener(tmp_path):
+    """POST /api/stop 转发到监听器，返回 {"stopped": True, "killed": [...]}。"""
+    fake = FakeClient()
+    app = _make(tmp_path, client=fake)
+    c = TestClient(app)
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
 
-    with respx.mock(assert_all_called=True) as mock:
-        mock.get("http://192.168.31.43:8765/key").mock(
-            return_value=_httpx.Response(200, json={"api_key": "abc", "hostname": "H"}))
-        app = _make(tmp_path)
-        c = TestClient(app)
-        r = c.get("/api/discover-key", params={"ip": "192.168.31.43", "port": 8765})
+    r = c.post("/api/stop")
+    assert r.status_code == 200
+    assert r.json() == {"stopped": True, "killed": ["BetterGI.exe"]}
+    assert fake._stopped is True  # 确实转发到了客户端 stop()
+
+
+def test_stop_unpaired_returns_400(tmp_path):
+    """未配对时 POST /api/stop 返回 400。"""
+    c = TestClient(_make(tmp_path))
+    r = c.post("/api/stop")
+    assert r.status_code == 400
+
+
+def test_stop_auth_error_returns_401(tmp_path):
+    """密钥失效时 POST /api/stop 返回 401（与 /api/abort 映射一致）。"""
+    from listener_client import ListenerAuthError
+
+    class AuthFailClient(FakeClient):
+        def stop(self):
+            raise ListenerAuthError("bad key")
+
+    app = _make(tmp_path, client=AuthFailClient())
+    c = TestClient(app)
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    r = c.post("/api/stop")
+    assert r.status_code == 401
+
+
+def test_stop_listener_error_returns_502(tmp_path):
+    """监听器不可达时 POST /api/stop 返回 502（与 /api/abort 映射一致）。"""
+    from listener_client import ListenerError
+
+    class DownClient(FakeClient):
+        def stop(self):
+            raise ListenerError("down")
+
+    app = _make(tmp_path, client=DownClient())
+    c = TestClient(app)
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    r = c.post("/api/stop")
+    assert r.status_code == 502
+
+
+def test_discover_key_returns_api_key(tmp_path, monkeypatch):
+    """GET /api/discover-key 代理目标监听器的 /key，返回 api_key + hostname。"""
+    import main as main_mod
+
+    def fake_http_get_json(ip, port, path="/", timeout=3.0):
+        assert (ip, port, path) == ("192.168.31.43", 8765, "/key")
+        return {"api_key": "abc", "hostname": "H"}
+
+    monkeypatch.setattr(main_mod, "_http_get_json", fake_http_get_json)
+    c = TestClient(_make(tmp_path))
+    r = c.get("/api/discover-key", params={"ip": "192.168.31.43", "port": 8765})
     assert r.status_code == 200
     assert r.json()["api_key"] == "abc"
     assert r.json()["hostname"] == "H"

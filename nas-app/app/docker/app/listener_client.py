@@ -1,15 +1,26 @@
 """Windows 监听器 HTTP 客户端。
 
-封装对 Windows 监听器五个接口的调用：health / tasks / trigger / status。
+封装对 Windows 监听器各接口的调用：health / tasks / trigger / status / abort / stop。
 传输层（request 可调用对象）可注入，便于单元测试（用假传输替代真实 httpx）。
 
 错误模型：
 - ListenerAuthError：监听器返回 401（密钥不对）——提示用户重新配对。
+- ListenerNotFound：监听器返回 404（job_id 不存在）——对账循环据此把历史标记为 unknown。
 - ListenerError：其他非 2xx 或网络异常——通用失败。
+
+状态机常量（TERMINAL_STATES / ACTIVE_STATES）与 windows-listener
+bgi_trigger/core/state.py 的 JobState 集合逐字对齐，修改一端必须同步另一端。
 """
 from __future__ import annotations
 
 from typing import Callable
+
+# 与 windows-listener bgi_trigger/core/state.py 的 JobState 终态集合逐字对齐。
+# 修改一端必须同步另一端（历史上 "timeout" 拼错 + 漏 abnormal_exit 导致历史卡 running）。
+TERMINAL_STATES = frozenset({"done", "abnormal_exit", "timed_out", "failed", "aborted"})
+
+# 仍需跟踪（前端轮询 / 后台对账）的活动态集合；"unknown" 等不在其中即停止跟踪。
+ACTIVE_STATES = frozenset({"running", "completing"})
 
 
 class ListenerError(Exception):
@@ -18,6 +29,10 @@ class ListenerError(Exception):
 
 class ListenerAuthError(ListenerError):
     """鉴权失败（401）。"""
+
+
+class ListenerNotFound(ListenerError):
+    """资源不存在（404，如 job_id 未知）。"""
 
 
 class ListenerClient:
@@ -48,6 +63,8 @@ class ListenerClient:
             raise ListenerError(f"network error: {e}") from e
         if resp.status_code == 401:
             raise ListenerAuthError("invalid api key")
+        if resp.status_code == 404:
+            raise ListenerNotFound(f"not found: {path}")
         if not (200 <= resp.status_code < 300):
             raise ListenerError(f"listener returned {resp.status_code}")
         return resp.json()
@@ -71,6 +88,10 @@ class ListenerClient:
     def abort(self) -> dict:
         """POST /abort，中止当前任务（仅在 completing 反悔窗口内有效，无活动任务 409）。"""
         return self._call("POST", "/abort")
+
+    def stop(self) -> dict:
+        """POST /stop，强制停止当前任务（杀进程级），返回 {"stopped": True, "killed": [...]}。"""
+        return self._call("POST", "/stop")
 
 
 def _default_request(method, url, headers=None, json=None, timeout=None):

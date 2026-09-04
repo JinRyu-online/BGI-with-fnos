@@ -3,22 +3,29 @@
 提供 Web GUI（Jinja2 模板）与一组 JSON API：
   设备发现与配对（M3）：/api/scan  /api/pair  /api/unpair  /api/config
   任务触发与回报（M4）：/api/tasks  /api/trigger  /api/status  /api/jobs
+  任务控制与运维：      /api/abort  /api/stop  /api/wol  /api/ws/logs/{job_id}
 
 应用通过 create_app(...) 工厂构造，扫描器、监听器客户端工厂、历史路径均可注入，
 便于单元测试（用假扫描器/假客户端替代真实网络）。
 
 扫描进度通过 /api/scan-progress 轮询获取,前端实时展示每个子网的状态(pending/scanning/done)
 与整体进度条。线程安全的进度状态保存在 _scan_progress 单例中,每完成一个子网就更新一次。
+
+后台对账（reconcile）：lifespan 启动 daemon 线程，每 reconcile_interval 秒扫一遍
+history 中 running/completing 的记录并向监听器查询状态，终态落盘——修复"浏览器一关
+历史就永远卡 running"的问题（历史上还叠加过 "timeout" 拼错/漏 abnormal_exit 的事故）。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -26,7 +33,14 @@ from pydantic import BaseModel
 
 from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
 from history import HistoryStore, default_history_path
-from listener_client import ListenerAuthError, ListenerClient, ListenerError
+from listener_client import (
+    ACTIVE_STATES,
+    TERMINAL_STATES,
+    ListenerAuthError,
+    ListenerClient,
+    ListenerError,
+    ListenerNotFound,
+)
 from settings import Settings
 
 log = logging.getLogger("bgi_trigger.main")
@@ -138,6 +152,15 @@ class TriggerBody(BaseModel):
     task_id: str
 
 
+class StopBody(BaseModel):
+    """POST /api/stop 请求体（保留扩展位，当前无需字段）。"""
+
+
+class WolBody(BaseModel):
+    mac: str | None = None
+    """为空时回退到配置 target_mac；两者都空返回 400。"""
+
+
 def _default_config_path() -> str:
     """配置文件路径：容器内由 compose 注入 BGI_DATA_DIR=/data；
     开发环境回退到源码旁的 etc/config.json。"""
@@ -167,6 +190,8 @@ def create_app(
     scanner=None,
     client_factory=None,
     history_path: str | None = None,
+    reconcile_interval: float | None = 30.0,
+    reconciler_factory: Callable[[Callable[[], object], "HistoryStore"], Callable[[], None]] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用。
 
@@ -174,15 +199,101 @@ def create_app(
       scanner(ip, port)          -> 设备列表
       client_factory(url, key)   -> ListenerClient 实例
       history_path               -> 历史文件路径
+      reconcile_interval         -> 后台对账循环间隔秒数；0 或 None 禁用
+      reconciler_factory(client_getter, history) -> tick 可调用对象（每轮执行一次）；
+                                    默认 None 用内置 _default_reconcile_tick。
+
+    后台对账：lifespan 启动 daemon 线程，每 reconcile_interval 秒把 history 中
+    running/completing 的记录向监听器查询一遍，终态/404 落盘，根治"浏览器一关
+    历史就永远卡 running"。线程通过 stop event 退出，event.wait 保证退出快。
     """
-    app = FastAPI(title="BetterGI Trigger NAS 应用")
-    # 挂载静态目录，供 index.html 引用 /static/bgi_icon.png 作为标题图标
-    if _STATIC_DIR.is_dir():
-        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     settings = Settings(config_path)
     history = HistoryStore(history_path or default_history_path())
     scan_fn = scanner or _default_scanner
     client_fn = client_factory or _default_client_factory
+
+    # ---------- 后台对账（reconcile）----------
+
+    def _reconcile_tick() -> int:
+        """对账一轮：查询所有 running/completing 记录的最新状态并落盘。
+
+        返回本轮仍在跟踪（活动态）的记录数。任何单条失败不影响其他记录。
+        """
+        try:
+            jobs = history.all()
+        except Exception:
+            log.exception("reconcile: read history failed")
+            return 0
+        tracked = [j for j in jobs if j.get("state") in ACTIVE_STATES]
+        still_active = 0
+        for job in tracked:
+            job_id = job.get("job_id")
+            if not job_id:
+                continue
+            try:
+                client, _ = _client_from_config()
+            except _Unpaired:
+                # 未配对：跳过本轮（配置可能稍后补上），保持记录原状
+                still_active += len(tracked)
+                break
+            try:
+                st = client.status(job_id)
+            except ListenerNotFound:
+                # 监听器已不认识该 job（重启丢历史等）：标记 unknown 停止跟踪
+                # （unknown 不在跟踪集合，前端显示灰色徽章）
+                history.record({"job_id": job_id, "state": "unknown"}, prev_fields_fallback=True)
+                continue
+            except ListenerError as e:
+                # 网络/鉴权等异常：下轮重试（鉴权失败反复重试无害——NAS 未配对场景已被上面拦截）
+                log.warning("reconcile: status(%s) failed: %s", job_id, e)
+                still_active += 1
+                continue
+            state = st.get("state", "")
+            if state in TERMINAL_STATES:
+                history.record(
+                    {"job_id": job_id, "state": state, "finished_at": time.time()},
+                    prev_fields_fallback=True,
+                )
+            elif state == "unknown":
+                # 监听器已不认识该 job（重启丢历史）：标记 unknown 停止跟踪（前端灰色徽章）
+                history.record({"job_id": job_id, "state": "unknown"}, prev_fields_fallback=True)
+            else:
+                still_active += 1
+        return still_active
+
+    reconcile_tick = reconciler_factory(_client_from_config, history) if reconciler_factory else _reconcile_tick
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        stop_event = threading.Event()
+        thread: threading.Thread | None = None
+        if reconcile_interval:
+            def _loop() -> None:
+                while not stop_event.is_set():
+                    try:
+                        reconcile_tick()
+                    except Exception:
+                        log.exception("reconcile tick crashed (will retry next round)")
+                    stop_event.wait(reconcile_interval)
+
+            thread = threading.Thread(target=_loop, name="bgi-reconcile", daemon=True)
+            thread.start()
+        try:
+            yield
+        finally:
+            if thread is not None:
+                stop_event.set()
+                thread.join(timeout=5.0)
+
+    app = FastAPI(title="BetterGI Trigger NAS 应用", lifespan=lifespan)
+    # 挂载静态目录，供 index.html 引用 /static/bgi_icon.png 作为标题图标
+    if _STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+    # ★ SPA（nas-app/frontend 构建产物，base=/spa/）经 /spa 挂载；
+    #   html=True 使 GET /spa/ 返回其 index.html。产物不存在时跳过（不影响后端）。
+    _SPA_DIR = _STATIC_DIR / "spa"
+    if _SPA_DIR.is_dir():
+        app.mount("/spa", StaticFiles(directory=str(_SPA_DIR), html=True), name="spa")
 
     def _client_from_config():
         """从已保存配置构造监听器客户端；未配对抛 _Unpaired。"""
@@ -202,7 +313,11 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
-        """首页：GUI 单页，配对状态由前端通过 API 获取。"""
+        """首页：GUI 单页，配对状态由前端通过 API 获取。
+
+        新版 SPA 位于 /spa/（nas-app/frontend 构建产物），本页保留为
+        兼容入口并提供跳转链接；后续可整体切换为 SPA。
+        """
         cfg = settings.load()
         return templates.TemplateResponse(
             request=request, name="index.html", context={"config": cfg}
@@ -407,8 +522,10 @@ def create_app(
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"查询失败：{e}")
 
-        # 终态时补填 finished_at,保留最早触发的 created_at（不覆盖）
-        is_terminal = st.get("state") in ("done", "timeout", "failed", "aborted")
+        # 终态时补填 finished_at,保留最早触发的 created_at（不覆盖）。
+        # TERMINAL_STATES 与 windows-listener JobState 逐字对齐
+        # （历史上 "timeout" 拼错 + 漏 abnormal_exit 导致 timed_out/abnormal_exit 卡 running）。
+        is_terminal = st.get("state") in TERMINAL_STATES
         rec = {"job_id": job_id, "task_id": st.get("task_id", ""), "state": st.get("state", "")}
         if is_terminal:
             rec["finished_at"] = time.time()
@@ -433,6 +550,118 @@ def create_app(
             raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"中止失败：{e}")
+
+    @app.post("/api/stop")
+    def api_stop(body: StopBody | None = None) -> dict:
+        """强制停止当前任务：转发到 Windows 监听器 POST /stop（杀进程级）。
+
+        返回 {"stopped": True, "killed": [...]}；错误映射与 /api/abort 一致。
+        """
+        try:
+            client, _ = _client_from_config()
+        except _Unpaired:
+            raise HTTPException(status_code=400, detail="未配对设备，请先扫描配对")
+        try:
+            return client.stop()
+        except ListenerAuthError:
+            raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
+        except ListenerError as e:
+            raise HTTPException(status_code=502, detail=f"停止失败：{e}")
+
+    @app.post("/api/wol")
+    def api_wol(body: WolBody | None = None) -> dict:
+        """Wake-on-LAN：发送魔术包唤醒目标机器。
+
+        body.mac 为空时回退配置 target_mac；两者都空返回 400。
+        socket 异常（广播失败）映射为 502。
+        """
+        from wol import send_magic_packet
+
+        body = body or WolBody()
+        cfg = settings.load()
+        mac = (body.mac or "").strip() or (cfg.get("target_mac") or "").strip()
+        if not mac:
+            raise HTTPException(status_code=400, detail="未配置 MAC 地址，请先在设置中填写 target_mac")
+        try:
+            send_magic_packet(mac)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except OSError as e:
+            raise HTTPException(status_code=502, detail=f"魔术包发送失败：{e}")
+        return {"sent": True, "mac": mac}
+
+    # ---------- 实时日志 WS 代理（薄透传，消息不解析转换） ----------
+
+    @app.websocket("/api/ws/logs/{job_id}")
+    async def api_ws_logs(websocket: WebSocket, job_id: str) -> None:
+        """代理浏览器与 Windows 监听器 ws://{ip}:{port}/ws/logs/{job_id} 之间的连接。
+
+        上游消息均为 JSON 文本帧（{"ts","lines"} / {"state",...} / {"last":true} / {"error"}），
+        原样透传不做解析。异常统一发一条 {"error": ...} 后关闭。
+        """
+        cfg = settings.load()
+        target = cfg.get("default_target")
+        await websocket.accept()
+        if not target:
+            await websocket.send_text('{"error": "unpaired"}')
+            await websocket.close()
+            return
+        upstream_url = f"ws://{target['ip']}:{target['port']}/ws/logs/{job_id}"
+        try:
+            import websockets
+
+            upstream = await websockets.connect(upstream_url, open_timeout=5)
+        except Exception:
+            log.warning("ws proxy: listener unreachable: %s", upstream_url)
+            await websocket.send_text('{"error": "listener unreachable"}')
+            await websocket.close()
+            return
+
+        async def pump_upstream_to_client() -> None:
+            try:
+                async for msg in upstream:
+                    if isinstance(msg, bytes):
+                        await websocket.send_bytes(msg)
+                    else:
+                        await websocket.send_text(msg)
+            finally:
+                await upstream.close()
+
+        async def pump_client_to_upstream() -> None:
+            """浏览器 → 监听器（一般只有 close / 偶发文本，均薄转发）。"""
+            try:
+                while True:
+                    msg = await websocket.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+                    text = msg.get("text")
+                    if text is not None:
+                        await upstream.send(text)
+                    elif msg.get("bytes") is not None:
+                        await upstream.send(msg["bytes"])
+            except WebSocketDisconnect:
+                pass
+
+        tasks = [asyncio.create_task(pump_upstream_to_client()),
+                 asyncio.create_task(pump_client_to_upstream())]
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                # 取出异常避免 "Task exception was never retrieved" 噪音
+                if not t.cancelled() and t.exception() is not None:
+                    log.warning("ws proxy: pump error: %s", t.exception())
+        finally:
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            try:
+                await upstream.close()
+            except Exception:
+                pass
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
     return app
 

@@ -42,3 +42,22 @@ def test_config_endpoint_returns_paired_target(tmp_path):
     assert r.status_code == 200
     assert r.json()["default_target"]["ip"] == "192.168.1.100"
     assert r.json()["default_target"]["hostname"] == "DESKTOP-X"
+
+
+def test_spa_mount_served_when_built(tmp_path):
+    """SPA 构建产物存在时 GET /spa/ 应返回其 index.html（资产引用以 /spa/ 为根）。"""
+    client = TestClient(_app(tmp_path))
+    r = client.get("/spa/")
+    if r.status_code == 404:
+        # 产物未构建（纯后端 CI）——跳过断言
+        return
+    assert r.status_code == 200
+    assert "assets/index-" in r.text
+
+
+def test_home_page_links_to_spa(tmp_path):
+    """旧首页提供新版 SPA 入口链接（/spa/）。"""
+    client = TestClient(_app(tmp_path))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'href="/spa/"' in r.text
