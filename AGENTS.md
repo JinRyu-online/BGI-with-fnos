@@ -66,7 +66,6 @@ discovery.py        网卡枚举 → CIDR → 并行 TCP 探活 + /health 识别
 listener_client.py  ListenerClient：Windows 端 typed 客户端（ListenerAuthError/ListenerError）
 history.py          HistoryStore：jobs.json 按 job_id 去重更新、截断 50 条
 settings.py         Settings：config.json 深度合并 DEFAULT_CONFIG
-templates/index.html  Jinja2 单页 GUI
 ```
 
 ### 状态机（单槽）
@@ -100,7 +99,7 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 
 **进程控制**：`POST /stop` 强制清理（terminate→wait 5s→kill，kill_processes 在 execution.py）；`/abort` 置信号 + 杀 BetterGI（`execution.abort_kills_game=true` 时连游戏）。`CompletionMonitor` 维护 seen_game 标志对账：BetterGI 消失且游戏从未出现过 → `failed`（防卡 24h）。
 
-**NAS 前端 SPA（nas-app/frontend/）**：Vite+Vue3+TS，`base: '/spa/'`，构建产物经 `npm run build:deploy` 复制到 `app/docker/app/static/spa/`，由 main.py `app.mount("/spa", StaticFiles(html=True))` 服务；旧 Jinja 首页保留为兼容入口并链向 `/spa/`。WS 一律走同源代理 `/api/ws/logs/{job_id}`（main.py 薄透传，websockets 库连上游），**严禁浏览器直连 Windows IP**（HTTPS mixed content 教训）。NAS 端后台对账循环（lifespan 启动，`reconcile_interval` 注入，0=禁用）持续把 running/completing 历史刷成终态——浏览器关闭不再卡"运行中"。`TERMINAL_STATES` 三端（state.py / listener_client.py / frontend constants.ts）逐字对齐，改一处必须同步另两处。
+**NAS 前端 SPA（nas-app/frontend/）**：Vite+Vue3+TS，`base: '/spa/'`，构建产物经 `npm run build:deploy` 复制到 `app/docker/app/static/spa/`，由 main.py `app.mount("/spa", StaticFiles(html=True))` 服务；`/` 直接 307 跳转 `/spa/`（旧 Jinja GUI 已删除），`/spa/{路由}` 深链/刷新由先于 Mount 注册的 fallback 路由兜底回 index.html（**Starlette 按注册顺序匹配，Mount 在前会吃掉深链**）。tab 栏图标为原神 Q 版表情（`frontend/src/assets/tabicons/`，换图直接替换同名 PNG）。WS 一律走同源代理 `/api/ws/logs/{job_id}`（main.py 薄透传，websockets 库连上游），**严禁浏览器直连 Windows IP**（HTTPS mixed content 教训）。NAS 端后台对账循环（lifespan 启动，`reconcile_interval` 注入，0=禁用）持续把 running/completing 历史刷成终态——浏览器关闭不再卡"运行中"。`TERMINAL_STATES` 三端（state.py / listener_client.py / frontend constants.ts）逐字对齐，改一处必须同步另两处。
 
 ## 关键约定与陷阱（改代码前必读）
 
