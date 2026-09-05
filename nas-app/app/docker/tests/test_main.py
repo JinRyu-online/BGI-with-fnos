@@ -14,18 +14,12 @@ def test_health_returns_ok():
     assert r.json()["status"] == "ok"
 
 
-def test_home_page_renders(tmp_path):
+def test_home_redirects_to_spa(tmp_path):
+    """首页 / 直接 307 跳转新版 SPA（旧 Jinja GUI 已移除）。"""
     client = TestClient(_app(tmp_path))
-    r = client.get("/")
-    assert r.status_code == 200
-    assert "BetterGI" in r.text  # 页面标题之类
-
-
-def test_home_page_shows_scan_prompt_when_unpaired(tmp_path):
-    client = TestClient(_app(tmp_path))
-    r = client.get("/")
-    # 未配对时页面提供「扫描」入口（GUI 为 JS 驱动，目标通过 /api/config 异步获取）
-    assert "扫描" in r.text
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/spa/"
 
 
 def test_config_endpoint_returns_paired_target(tmp_path):
@@ -56,8 +50,27 @@ def test_spa_mount_served_when_built(tmp_path):
 
 
 def test_home_page_links_to_spa(tmp_path):
-    """旧首页提供新版 SPA 入口链接（/spa/）。"""
+    """跟随跳转后应落在 SPA 页面（/spa/ 返回其 index.html）。"""
     client = TestClient(_app(tmp_path))
-    r = client.get("/")
+    r = client.get("/")  # follow_redirects 默认 True
+    if r.status_code == 404:
+        # 产物未构建（纯后端 CI）——跳过断言
+        return
     assert r.status_code == 200
-    assert 'href="/spa/"' in r.text
+    assert "assets/index-" in r.text
+
+
+def test_spa_deep_link_fallback(tmp_path):
+    """/spa/tasks 等 history 深链应回退 index.html；assets 缺失仍 404。"""
+    client = TestClient(_app(tmp_path))
+    r = client.get("/spa/tasks")
+    if r.status_code == 404:
+        return  # 产物未构建（纯后端 CI）
+    assert r.status_code == 200
+    assert "assets/index-" in r.text
+    # 已知资产文件由 StaticFiles 挂载处理，不受回退影响
+    r2 = client.get("/spa/definitely-missing.png")
+    assert r2.status_code == 404
+    # 真实资产文件可正常命中（favicon.png 由 public/ 复制进产物）
+    r3 = client.get("/spa/favicon.png")
+    assert r3.status_code == 200

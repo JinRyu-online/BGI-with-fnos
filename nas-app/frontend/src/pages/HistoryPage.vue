@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from 'vue'
 import HistoryCard from '../components/HistoryCard.vue'
 import Skeleton from '../components/Skeleton.vue'
+import GIcon from '../components/GIcon.vue'
 import { api } from '../composables/useApi'
 import { resumeActiveJob } from '../composables/useJob'
 import { pollIntervalSec } from '../composables/useConfig'
@@ -75,7 +76,7 @@ onMounted(async () => {
           @click="filter = f.key"
         >{{ f.label }}</button>
         <button class="chip chip-refresh" :disabled="refreshing" @click="refresh">
-          <span v-if="refreshing" class="spinner spinner-dark"></span>⟳ 刷新
+          <span v-if="refreshing" class="spinner spinner-dark"></span><template v-else><GIcon name="refresh" :size="13" /></template> 刷新
         </button>
       </div>
 

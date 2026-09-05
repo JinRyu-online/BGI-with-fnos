@@ -25,10 +25,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
@@ -122,9 +121,6 @@ def _http_get_json(ip: str, port: int, path: str = "/", timeout: float = 3.0) ->
         return None
     return None
 
-# 模板目录位于 app/templates/（容器内 /app/templates）。
-_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -291,8 +287,29 @@ def create_app(
         app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     # ★ SPA（nas-app/frontend 构建产物，base=/spa/）经 /spa 挂载；
     #   html=True 使 GET /spa/ 返回其 index.html。产物不存在时跳过（不影响后端）。
+    #   注意顺序：history 回退路由必须先于 StaticFiles Mount 注册——Starlette 按注册
+    #   顺序匹配，Mount 在前会把 /spa/tasks 等深链吃掉直接 404，回退永远轮不到。
     _SPA_DIR = _STATIC_DIR / "spa"
     if _SPA_DIR.is_dir():
+        _SPA_INDEX = _SPA_DIR / "index.html"
+
+        @app.get("/spa/{rest:path}", include_in_schema=False)
+        def spa_fallback(rest: str) -> FileResponse:
+            # 真实资产文件（assets/*.js、favicon.png 等）直接返回该文件；
+            # assets/ 下不存在的文件 404（资产缺失要暴露，不能静默回 HTML）；
+            # 其余单段无扩展名路径视为前端 history 路由，回退 index.html。
+            candidate = (_SPA_DIR / rest).resolve()
+            if (
+                rest
+                and ".." not in rest
+                and candidate.is_file()
+                and candidate.is_relative_to(_SPA_DIR.resolve())
+            ):
+                return FileResponse(candidate)
+            if "/" in rest or rest.endswith((".png", ".js", ".css", ".ico", ".map", ".webp")):
+                raise HTTPException(status_code=404)
+            return FileResponse(_SPA_INDEX)
+
         app.mount("/spa", StaticFiles(directory=str(_SPA_DIR), html=True), name="spa")
 
     def _client_from_config():
@@ -311,17 +328,10 @@ def create_app(
         """NAS 应用自检。"""
         return {"status": "ok"}
 
-    @app.get("/", response_class=HTMLResponse)
-    def index(request: Request) -> HTMLResponse:
-        """首页：GUI 单页，配对状态由前端通过 API 获取。
-
-        新版 SPA 位于 /spa/（nas-app/frontend 构建产物），本页保留为
-        兼容入口并提供跳转链接；后续可整体切换为 SPA。
-        """
-        cfg = settings.load()
-        return templates.TemplateResponse(
-            request=request, name="index.html", context={"config": cfg}
-        )
+    @app.get("/", include_in_schema=False)
+    def index() -> RedirectResponse:
+        """首页直接 307 跳转新版 SPA（/spa/）；旧 Jinja GUI 已移除。"""
+        return RedirectResponse(url="/spa/", status_code=307)
 
     # ---------- M3：设备发现与配对 ----------
 

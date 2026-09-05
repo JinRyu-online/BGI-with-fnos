@@ -1,73 +1,74 @@
 /* ============================================================
    BetterGI Trigger · 设计 Token（单一来源）
-   与 docs/原型/bgi-prototype.html 的 :root 一字不差（docs/gui-design.md §1）
+   主题：原神风（赛璐璐二次元）——米色羊皮纸底 + 金色主色 + 深棕文字 + 大圆角
    ============================================================ */
 :root {
-  /* ===== 品牌色 ===== */
-  --brand: #5b8def;
-  --brand-pressed: #3a6fd8;
-  --brand-weak: #eef3fe;
+  /* ===== 品牌色（原神金）===== */
+  --brand: #c9a86a;               /* 鎏金 */
+  --brand-pressed: #b18f4f;       /* 按下深金 */
+  --brand-weak: #f7f0e0;          /* 金色弱底 */
+  --brand-strong: #a5854a;        /* 描边金 */
 
-  /* ===== 中性色 ===== */
-  --bg: #f4f6f9;
-  --surface: #ffffff;
-  --surface-2: #fafbfc;
-  --border: #e5e7eb;
-  --border-strong: #d7dbe0;
-  --text-1: #1e293b;
-  --text-2: #64748b;
-  --text-3: #94a3b8;
+  /* ===== 中性色（暖米色系）===== */
+  --bg: #f6f1e7;                  /* 羊皮纸底 */
+  --surface: #fdfaf3;             /* 卡片米白 */
+  --surface-2: #f4eee0;           /* 次级底 */
+  --border: #e7dcc4;              /* 暖边框 */
+  --border-strong: #d6c8a8;
+  --text-1: #3b4a5a;              /* 原神深蓝棕（提瓦特夜色）*/
+  --text-2: #7d7566;              /* 暖灰棕 */
+  --text-3: #a89d88;
 
   /* ===== 语义色 ===== */
-  --danger: #dc2626;
-  --danger-pressed: #b91c1c;
-  --danger-weak: #fee2e2;
-  --warning: #d97706;
-  --warning-weak: #fef3c7;
-  --success: #16a34a;
-  --success-weak: #dcfce7;
-  --info: #2563eb;
-  --info-weak: #dbeafe;
+  --danger: #cc4b4b;
+  --danger-pressed: #a83a3a;
+  --danger-weak: #f9e4e4;
+  --warning: #cf8a2e;
+  --warning-weak: #faeecd;
+  --success: #58a55c;
+  --success-weak: #e2f2e0;
+  --info: #4f83bf;
+  --info-weak: #e2ecf8;
 
   /* ===== 任务状态色（7 后端态 + idle 前端占位态）===== */
-  --state-idle: #94a3b8;            /* 灰 */
-  --state-idle-weak: #eef0f3;
-  --state-idle-text: #64748b;
-  --state-running: #f59e0b;         /* 黄（呼吸） */
-  --state-running-weak: #fef3c7;
-  --state-running-text: #b45309;
-  --state-completing: #3b82f6;      /* 蓝（呼吸） */
-  --state-completing-weak: #dbeafe;
-  --state-completing-text: #1d4ed8;
-  --state-done: #22c55e;            /* 绿 */
-  --state-done-weak: #dcfce7;
-  --state-done-text: #15803d;
-  --state-failed: #ef4444;          /* 红 */
-  --state-failed-weak: #fee2e2;
-  --state-failed-text: #b91c1c;
-  --state-timed-out: #f97316;       /* 橙 */
-  --state-timed-out-weak: #ffedd5;
-  --state-timed-out-text: #c2410c;
-  --state-aborted: #b4534b;         /* 灰红 */
-  --state-aborted-weak: #f6e7e5;
-  --state-aborted-text: #9a443d;
-  --state-abnormal-exit: #ef4444;   /* 红 */
-  --state-abnormal-exit-weak: #fee2e2;
-  --state-abnormal-exit-text: #b91c1c;
+  --state-idle: #a89d88;            /* 暖灰 */
+  --state-idle-weak: #f0eadd;
+  --state-idle-text: #7d7566;
+  --state-running: #d9a13b;         /* 金黄（呼吸） */
+  --state-running-weak: #faeecd;
+  --state-running-text: #9a6b14;
+  --state-completing: #6f9fd8;      /* 晴蓝（呼吸） */
+  --state-completing-weak: #e2ecf8;
+  --state-completing-text: #2f5f96;
+  --state-done: #58a55c;            /* 叶绿 */
+  --state-done-weak: #e2f2e0;
+  --state-done-text: #35703a;
+  --state-failed: #cc4b4b;          /* 绯红 */
+  --state-failed-weak: #f9e4e4;
+  --state-failed-text: #99312f;
+  --state-timed-out: #d97b3b;       /* 橙 */
+  --state-timed-out-weak: #fbe8da;
+  --state-timed-out-text: #9c4f17;
+  --state-aborted: #a8758c;         /* 藕紫 */
+  --state-aborted-weak: #f5e8ef;
+  --state-aborted-text: #7c4f63;
+  --state-abnormal-exit: #cc4b4b;   /* 绯红 */
+  --state-abnormal-exit-weak: #f9e4e4;
+  --state-abnormal-exit-text: #99312f;
 
   /* 呼吸光晕（与状态色配套的 rgba，仅 running/completing 使用） */
-  --glow-running: rgba(245, 158, 11, .45);
-  --glow-completing: rgba(59, 130, 246, .45);
+  --glow-running: rgba(217, 161, 59, .45);
+  --glow-completing: rgba(111, 159, 216, .45);
 
-  /* ===== 日志面板（深色）===== */
-  --log-bg: #0b1220;
-  --log-head-bg: #0f172a;
-  --log-border: #1e293b;
-  --log-text: #cbd5e1;
-  --log-text-dim: #64748b;
-  --log-keyword: #fbbf24;   /* “任务结束”关键字 黄 */
-  --log-error: #f87171;     /* 错误行 红 */
-  --log-sys: #22d3ee;       /* 系统消息 青 */
+  /* ===== 日志面板（深色，夜幕蓝棕）===== */
+  --log-bg: #232a36;
+  --log-head-bg: #2b3341;
+  --log-border: #3d4757;
+  --log-text: #d8d3c5;
+  --log-text-dim: #8a8474;
+  --log-keyword: #ecc06a;   /* "任务结束"关键字 金 */
+  --log-error: #e88a8a;     /* 错误行 红 */
+  --log-sys: #7fc9c4;       /* 系统消息 青 */
 
   /* ===== 间距刻度（4px 基准）===== */
   --space-1: 4px;
@@ -77,10 +78,10 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  /* ===== 圆角 ===== */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* ===== 圆角（原神大圆角）===== */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
   --radius-full: 999px;
 
   /* ===== 字号阶梯 ===== */
@@ -105,7 +106,7 @@
   --tabbar-height: 64px;     /* 底部 Tab 高度（不含安全区） */
   --logpanel-height: 240px;  /* 日志面板滚动区高度 */
 
-  /* ===== 阴影 ===== */
-  --shadow-card: 0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
-  --shadow-float: 0 8px 24px rgba(15, 23, 42, .16);
+  /* ===== 阴影（暖色低透）===== */
+  --shadow-card: 0 2px 6px rgba(122, 100, 60, .08), 0 1px 2px rgba(122, 100, 60, .05);
+  --shadow-float: 0 8px 24px rgba(122, 100, 60, .18);
 }

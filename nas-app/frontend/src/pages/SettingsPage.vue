@@ -5,6 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import Skeleton from '../components/Skeleton.vue'
+import GIcon from '../components/GIcon.vue'
 import { api } from '../composables/useApi'
 import { useConfig, loadConfig } from '../composables/useConfig'
 import { forceStop } from '../composables/useJob'
@@ -189,7 +190,9 @@ onMounted(async () => {
       <!-- 配对状态卡 -->
       <div class="card">
         <div class="pair-row">
-          <span class="badge" :class="paired ? 'b-done' : 'b-idle'">{{ paired ? '✅ 已配对' : '⚪ 未配对' }}</span>
+          <span class="badge" :class="paired ? 'b-done' : 'b-idle'">
+            <GIcon :name="paired ? 'check' : 'dot'" :size="12" /> {{ paired ? '已配对' : '未配对' }}
+          </span>
           <div class="pair-info">
             <div class="pair-host">{{ hostText }}</div>
             <div class="pair-sub">{{ subText }}</div>
@@ -201,7 +204,7 @@ onMounted(async () => {
       <div class="sec-title">扫描设备</div>
       <div class="card">
         <button class="btn btn-primary btn-block" :disabled="scanning" @click="startScan">
-          <span v-if="scanning" class="spinner"></span>{{ scanning ? '扫描中…' : '🔍 开始扫描' }}
+          <span v-if="scanning" class="spinner"></span><template v-else><GIcon name="search" :size="15" /> </template>{{ scanning ? '扫描中…' : '开始扫描' }}
         </button>
         <template v-if="scan.show">
           <div class="scan-progress">
@@ -219,7 +222,7 @@ onMounted(async () => {
           <div v-if="scan.errorMsg" class="scan-error">{{ scan.errorMsg }}</div>
           <div v-for="d in scan.devices" :key="d.ip" class="card dev-card">
             <div class="pair-row">
-              <span class="badge b-running">📡 发现设备</span>
+              <span class="badge b-running"><GIcon name="signal" :size="12" /> 发现设备</span>
               <div class="pair-info">
                 <div class="pair-host">{{ d.hostname || '(未知主机)' }}</div>
                 <div class="pair-sub">{{ d.ip }}:{{ d.port }}{{ d.version ? ' · v' + d.version : '' }}</div>
@@ -254,11 +257,11 @@ onMounted(async () => {
       <div class="sec-title">危险区</div>
       <div class="card danger-card">
         <button class="danger-item" @click="onDangerCleanup">
-          <span>🧹 强制清理<small>终止当前任务并重置监听器运行状态</small></span>
+          <span><GIcon name="broom" :size="15" /> 强制清理<small>终止当前任务并重置监听器运行状态</small></span>
           <span>›</span>
         </button>
         <button class="danger-item" :disabled="unpairing" @click="onDangerUnpair">
-          <span>🔌 取消配对<small>断开与当前 Windows 主机的配对</small></span>
+          <span><GIcon name="plug" :size="15" /> 取消配对<small>断开与当前 Windows 主机的配对</small></span>
           <span>›</span>
         </button>
       </div>
@@ -320,7 +323,7 @@ onMounted(async () => {
   padding: var(--space-2) var(--space-3); font-size: var(--font-base); font-weight: 500;
   color: var(--danger); text-align: left;
 }
-.danger-item:first-of-type { border-top: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
-.danger-item:last-of-type { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.danger-item span:first-child { display: flex; align-items: center; }
+.danger-item span:first-child small { margin-left: 6px; }
 .danger-item small { display: block; font-size: var(--font-xs); color: var(--text-3); font-weight: 400; margin-top: 2px; }
 </style>

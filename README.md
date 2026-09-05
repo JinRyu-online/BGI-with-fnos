@@ -57,7 +57,7 @@ nas-app/app/docker/app/                    windows-listener/
  ├── listener_client.py                     └── bgi_trigger/
  ├── history.py                                 ├── api/app.py     七接口+WS
  ├── settings.py                                ├── service/
- └── templates/index.html                      │   ├── auth.py   密钥+IP 白名单
+ └── static/spa/  ← SPA 构建产物                │   ├── auth.py   密钥+IP 白名单
                                                 │   └── config.py TOML+首启生成
                                                 └── core/
                                                     ├── state.py       单槽状态机
@@ -153,7 +153,7 @@ Windows 监听器暴露 8 个端点（协议细节见 [`windows-listener/api/ope
 
 NAS 应用自身的代理接口：`/api/scan` `/api/pair` `/api/tasks` `/api/trigger` `/api/status` `/api/abort` `/api/stop` `/api/wol` `/api/jobs` `/api/discover-key` `/api/ws/logs/{job_id}`（WS 同源代理——浏览器**不直连** Windows，规避 HTTPS mixed content 与防火墙问题）。
 
-Web GUI 有两版：新版移动端优先 SPA（`/spa/`，源码 [`nas-app/frontend/`](nas-app/frontend/)，Vue3+TS）；旧版单页（`/`，保留为兼容入口）。NAS 后台每 30s 自动对账：浏览器关闭后运行中的历史任务也会被刷成终态，不再卡"运行中"。设置页支持 WOL 一键唤醒（需填目标机 MAC）。
+Web GUI 为移动端优先 SPA（`/` 自动跳转 `/spa/`，源码 [`nas-app/frontend/`](nas-app/frontend/)，Vue3+TS；底部导航用原神 Q 版角色表情图标）。NAS 后台每 30s 自动对账：浏览器关闭后运行中的历史任务也会被刷成终态，不再卡"运行中"。设置页支持 WOL 一键唤醒（需填目标机 MAC）。
 
 ## 安全模型
 

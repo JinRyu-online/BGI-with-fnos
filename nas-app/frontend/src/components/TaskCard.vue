@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * 任务卡（照原型 §4.3）：显示名 + 触发按钮；分组链 pill；⏱/收尾属性 pill。
+ * 任务卡（照原型 §4.3）：显示名 + 触发按钮；分组链 pill；时长/收尾属性 pill。
  */
 import type { BgiTask } from '../types'
-import { AFTER_DONE_LABEL } from '../constants'
+import { AFTER_DONE_LABEL, AFTER_DONE_ICON } from '../constants'
 import TriggerButton from './TriggerButton.vue'
+import GIcon from './GIcon.vue'
 
 defineProps<{ task: BgiTask }>()
 </script>
@@ -22,8 +23,8 @@ defineProps<{ task: BgiTask }>()
       </template>
     </div>
     <div class="tc-props">
-      <span class="pill pill-time">⏱ {{ task.timeout_min }} 分钟</span>
-      <span class="pill pill-after">{{ AFTER_DONE_LABEL[task.after_done] || task.after_done }}</span>
+      <span class="pill pill-time"><GIcon name="hourglass" :size="13" /> {{ task.timeout_min }} 分钟</span>
+      <span class="pill pill-after"><GIcon :name="AFTER_DONE_ICON[task.after_done] || 'pause'" :size="13" /> {{ AFTER_DONE_LABEL[task.after_done] || task.after_done }}</span>
     </div>
   </div>
 </template>

@@ -86,7 +86,7 @@ main.py  (FastAPI factory: create_app(config_path, scanner, client_factory, hist
   ├── listener_client.py →  ListenerClient: typed wrapper over Windows 5 endpoints (health/tasks/trigger/status)
   ├── history.py        →  HistoryStore: job history dedup+truncate (jobs.json)
   ├── settings.py       →  Settings: JSON config with defaults merge (config.json)
-  └── templates/        →  Jinja2 single-page GUI
+  └── static/spa/       →  built SPA assets (Vue3+TS, served at /spa/; / redirects to it)
 ```
 
 ### State Machine (Single-Slot)
