@@ -98,6 +98,20 @@ class TriggerBody(BaseModel):
     task_id: str
 
 
+class TaskBody(BaseModel):
+    """PUT /tasks 单个任务定义（校验规则同 TaskRegistry._build）。"""
+    id: str
+    display_name: str = ""
+    groups: list[str]
+    timeout_min: int = 90
+    after_done: str = "sleep"
+
+
+class TaskListBody(BaseModel):
+    """PUT /tasks 请求体：整体替换清单。"""
+    tasks: list[TaskBody]
+
+
 def create_app(deps: AppDeps) -> FastAPI:
     """创建并返回配置好路由的 FastAPI 应用。"""
     app = FastAPI(title="BetterGI Trigger Listener")
@@ -139,6 +153,25 @@ def create_app(deps: AppDeps) -> FastAPI:
         tasks = [t.to_dict() for t in deps.tasks.all()]
         log.info("tasks listed for %s (%d tasks)", client_ip, len(tasks))
         return tasks
+
+    @app.put("/tasks")
+    def replace_tasks(request: Request, body: TaskListBody,
+                      authorization: str | None = Header(default=None)) -> list[dict]:
+        """整体替换任务清单（NAS GUI 编辑用）：全量校验后写回 tasks 文件/目录。
+
+        任一任务非法 → 400（不落盘）；成功返回替换后的完整清单（目录模式含
+        手写 *.json 里的任务，同 id 时手写文件覆盖 GUI 版本）。写回后 mtime
+        热加载自动生效，无需重启监听器。
+        """
+        client_ip = request.client.host if request.client else "?"
+        authenticate(request, authorization)
+        try:
+            tasks = deps.tasks.save_all([t.model_dump() for t in body.tasks])
+        except ValueError as e:
+            log.warning("tasks replace rejected from %s: %s", client_ip, e)
+            raise HTTPException(status_code=400, detail=str(e))
+        log.info("tasks replaced by %s (%d tasks)", client_ip, len(tasks))
+        return [t.to_dict() for t in tasks]
 
     @app.post("/trigger", status_code=202)
     def trigger(body: TriggerBody, request: Request,

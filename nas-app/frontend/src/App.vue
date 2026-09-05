@@ -11,7 +11,6 @@ import { useConfig } from './composables/useConfig'
 import { bootRuntime } from './composables/jobRuntime'
 import ToastHost from './components/ToastHost.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
-import { showConfirm } from './composables/useConfirm'
 import logoUrl from './assets/tabicons/logo.png'
 import iconStatus from './assets/tabicons/status.png'
 import iconStatusGray from './assets/tabicons/status_gray.png'
@@ -50,20 +49,6 @@ function go(path: string): void {
   if (!isActive(path)) void router.push(path)
 }
 
-/* ---- 退出应用：关闭标签页（WebView 内通常直接关掉容器页）；失败则回 NAS 首页 ---- */
-const exiting = ref(false)
-async function onExit(): Promise<void> {
-  const ok = await showConfirm('退出应用', '关闭 BetterGI Trigger 并返回？', '退出')
-  if (!ok) return
-  exiting.value = true
-  window.close()
-  // window.close() 对非脚本打开的标签页通常无效——兜底跳回源站首页（飞牛入口页）
-  setTimeout(() => {
-    exiting.value = false
-    location.href = '/'
-  }, 300)
-}
-
 const ready = ref(false)
 onMounted(async () => {
   await bootRuntime()
@@ -77,7 +62,6 @@ onMounted(async () => {
       <img class="app-logo" :src="logoUrl" alt="" />
       <div class="app-title">BetterGI Trigger</div>
       <div class="device-chip" :class="{ unpaired: !paired }">{{ deviceChip }}</div>
-      <button class="exit-btn" :disabled="exiting" aria-label="退出应用" @click="onExit">✕</button>
     </header>
 
     <main class="pages">
@@ -114,17 +98,6 @@ onMounted(async () => {
   border-radius: 8px;
   flex-shrink: 0;
 }
-.exit-btn {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  margin-left: 6px;
-  border: none; border-radius: 50%;
-  background: var(--surface-2); color: var(--text-3);
-  font-size: 13px; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background .15s, color .15s, transform .06s;
-}
-.exit-btn:active { transform: scale(.92); background: var(--danger-weak); color: var(--danger); }
 
 .tab-icon {
   width: 26px;

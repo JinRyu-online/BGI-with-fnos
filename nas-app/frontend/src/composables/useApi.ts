@@ -50,6 +50,11 @@ export const api = {
     return request<BgiTask[]>('GET', '/api/tasks')
   },
 
+  putTasks(tasks: BgiTask[]): Promise<BgiTask[]> {
+    if (mockEnabled) return mockApi.putTasks(tasks)
+    return request<BgiTask[]>('PUT', '/api/tasks', { tasks })
+  },
+
   startScan(subnet?: string): Promise<ScanAck> {
     if (mockEnabled) return mockApi.startScan()
     return request<ScanAck>('POST', '/api/scan', subnet ? { subnet } : {})

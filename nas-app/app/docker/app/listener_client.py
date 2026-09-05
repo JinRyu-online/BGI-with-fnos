@@ -77,6 +77,14 @@ class ListenerClient:
         """GET /tasks，返回任务清单。"""
         return self._call("GET", "/tasks")
 
+    def replace_tasks(self, tasks: list[dict]) -> list[dict]:
+        """PUT /tasks，整体替换任务清单（Windows 端写回 tasks 文件）。
+
+        任一任务非法 → Windows 400 → 映射 ListenerError（消息含 400）。
+        返回替换后的完整清单（可能含 Windows 手写文件里的任务）。
+        """
+        return self._call("PUT", "/tasks", json={"tasks": tasks})
+
     def trigger(self, task_id: str) -> dict:
         """POST /trigger，启动任务，返回 {"job_id": ...}。"""
         return self._call("POST", "/trigger", json={"task_id": task_id})

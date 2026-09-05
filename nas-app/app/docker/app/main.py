@@ -167,6 +167,20 @@ class SchedulesBody(BaseModel):
     schedules: list[dict]
 
 
+class TaskItemBody(BaseModel):
+    """PUT /api/tasks 单个任务（字段与 Windows 端 TaskBody 对齐）。"""
+    id: str
+    display_name: str = ""
+    groups: list[str]
+    timeout_min: int = 90
+    after_done: str = "sleep"
+
+
+class TasksBody(BaseModel):
+    """PUT /api/tasks 请求体：整体替换任务清单。"""
+    tasks: list[TaskItemBody]
+
+
 def _default_config_path() -> str:
     """配置文件路径：容器内由 compose 注入 BGI_DATA_DIR=/data；
     开发环境回退到源码旁的 etc/config.json。"""
@@ -645,6 +659,25 @@ def create_app(
             raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"监听器不可达：{e}")
+
+    @app.put("/api/tasks")
+    def api_tasks_replace(body: TasksBody) -> list[dict]:
+        """编辑任务清单：转发到 Windows 端 PUT /tasks（写回 tasks 文件，热加载生效）。
+
+        Windows 400（任务定义非法）透传为 400；未配对 400；监听器不可达 502。
+        """
+        try:
+            client, _ = _client_from_config()
+        except _Unpaired:
+            raise HTTPException(status_code=400, detail="未配对设备，请先扫描配对")
+        try:
+            return client.replace_tasks([t.model_dump() for t in body.tasks])
+        except ListenerAuthError:
+            raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
+        except ListenerError as e:
+            if "400" in str(e):
+                raise HTTPException(status_code=400, detail=f"任务定义非法：{e}")
+            raise HTTPException(status_code=502, detail=f"保存失败：{e}")
 
     @app.post("/api/trigger", status_code=202)
     def api_trigger(body: TriggerBody) -> dict:

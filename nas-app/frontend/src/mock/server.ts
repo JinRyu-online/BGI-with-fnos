@@ -148,6 +148,12 @@ export const mockApi = {
     return MOCK_TASKS.map(t => ({ ...t }))
   },
 
+  async putTasks(tasks: BgiTask[]): Promise<BgiTask[]> {
+    await sleep(200)
+    MOCK_TASKS.splice(0, MOCK_TASKS.length, ...tasks.map(t => ({ ...t })))
+    return MOCK_TASKS.map(t => ({ ...t }))
+  },
+
   async trigger(taskId: string): Promise<TriggerAck> {
     if (job && !['done', 'abnormal_exit', 'timed_out', 'failed', 'aborted'].includes(job.state)) {
       throw new MockHttpError(409, '已有任务在运行')

@@ -84,6 +84,9 @@ export interface BgiTask {
   after_done: string
 }
 
+/** 任务编辑合法的收尾动作（与 Windows 端 VALID_AFTER_DONE 对齐）。 */
+export const TASK_AFTER_DONE_OPTIONS = ['sleep', 'shutdown', 'lock', 'none'] as const
+
 export interface TriggerAck {
   job_id: string
   task_id: string

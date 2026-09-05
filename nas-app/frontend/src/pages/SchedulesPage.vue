@@ -19,8 +19,34 @@ const tasks = ref<BgiTask[]>([])
 const loading = ref(true)
 
 const editing = ref(false) // 弹层开关
+const editingIndex = ref(-1) // -1=新建，>=0=编辑（弹层标题用）
 const saving = ref(false)
 const runningId = ref('') // 手动执行 spinner
+const timePicker = ref(false)
+const taskPicker = ref(false)
+const tpHour = ref(12)
+const tpMinute = ref(0)
+
+function taskNameOf(id: string): string {
+  return tasks.value.find(t => t.id === id)?.display_name ?? ''
+}
+
+function openTimePicker(): void {
+  const [h, m] = form.time.split(':').map(Number)
+  tpHour.value = Number.isFinite(h) ? h : 12
+  tpMinute.value = Number.isFinite(m) ? Math.round(m / 5) * 5 % 60 : 0
+  timePicker.value = true
+}
+
+function applyTime(): void {
+  form.time = `${String(tpHour.value).padStart(2, '0')}:${String(tpMinute.value).padStart(2, '0')}`
+  timePicker.value = false
+}
+
+function pickTask(t: BgiTask): void {
+  form.task_id = t.id
+  taskPicker.value = false
+}
 
 /** 空白编辑表单（新增与编辑共用） */
 const form = reactive({
@@ -72,6 +98,7 @@ function openNew(): void {
     weekdays: [], task_id: tasks.value[0]?.id ?? '',
     wake: true, wake_timeout_sec: 300, skip_if_busy: true,
   })
+  editingIndex.value = -1
   editing.value = true
 }
 
@@ -81,6 +108,7 @@ function openEdit(s: ScheduleItem): void {
     weekdays: [...s.weekdays], task_id: s.task_id,
     wake: s.wake, wake_timeout_sec: s.wake_timeout_sec, skip_if_busy: s.skip_if_busy,
   })
+  editingIndex.value = schedules.value.findIndex(x => x.id === s.id)
   editing.value = true
 }
 
@@ -211,7 +239,8 @@ function useConfigReady(): boolean {
       <!-- 编辑弹层 -->
       <div v-if="editing" class="overlay" @click.self="editing = false">
         <div class="sheet">
-          <div class="sheet-title">{{ form.name || '新建定时任务' }}</div>
+          <div class="sheet-grip"></div>
+          <div class="sheet-title">{{ editingIndex >= 0 ? '编辑定时任务' : '新建定时任务' }}</div>
 
           <div class="field">
             <label>名称</label>
@@ -219,7 +248,10 @@ function useConfigReady(): boolean {
           </div>
           <div class="field">
             <label>触发时间</label>
-            <input v-model="form.time" type="time">
+            <button type="button" class="select-sim" @click="openTimePicker">
+              <span class="ss-value">{{ form.time }}</span>
+              <GIcon name="hourglass" :size="14" />
+            </button>
           </div>
           <div class="field">
             <label>重复（不选 = 每天）</label>
@@ -233,10 +265,10 @@ function useConfigReady(): boolean {
           </div>
           <div class="field">
             <label>执行任务</label>
-            <select v-model="form.task_id">
-              <option v-for="t in tasks" :key="t.id" :value="t.id">{{ t.display_name }}</option>
-              <option v-if="!tasks.length && form.task_id" :value="form.task_id">{{ form.task_id }}（离线）</option>
-            </select>
+            <button type="button" class="select-sim" @click="taskPicker = true">
+              <span class="ss-value" :class="{ dim: !taskNameOf(form.task_id) }">{{ taskNameOf(form.task_id) || '选择任务' }}</span>
+              <span class="ss-arrow">›</span>
+            </button>
             <div v-if="nameErr" class="warn">{{ nameErr }}</div>
           </div>
           <div class="field row">
@@ -246,11 +278,55 @@ function useConfigReady(): boolean {
             <label class="check"><input v-model="form.skip_if_busy" type="checkbox"> Windows 忙时跳过本次</label>
           </div>
 
+          <!-- sticky 底部操作条：iOS 键盘/小屏下按钮固定可见，绝不随内容滚没 -->
           <div class="sheet-actions">
             <button class="btn btn-secondary" @click="editing = false">取消</button>
             <button class="btn btn-primary" :disabled="saving" @click="save">
               <span v-if="saving" class="spinner"></span>保存
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 时间选择（自绘滚轮式面板，替代原生 time input 的系统样式差异） -->
+      <div v-if="timePicker" class="overlay center" @click.self="timePicker = false">
+        <div class="picker-card">
+          <div class="picker-title">触发时间</div>
+          <div class="tp-row">
+            <select v-model.number="tpHour" class="tp-select">
+              <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ String(h - 1).padStart(2, '0') }} 时</option>
+            </select>
+            <span class="tp-colon">:</span>
+            <select v-model.number="tpMinute" class="tp-select">
+              <option v-for="m in 12" :key="(m - 1) * 5" :value="(m - 1) * 5">{{ String((m - 1) * 5).padStart(2, '0') }} 分</option>
+            </select>
+          </div>
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" @click="timePicker = false">取消</button>
+            <button class="btn btn-primary" @click="applyTime">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务选择（底部列表弹层，替代原生 select 的系统样式差异） -->
+      <div v-if="taskPicker" class="overlay" @click.self="taskPicker = false">
+        <div class="sheet">
+          <div class="sheet-grip"></div>
+          <div class="sheet-title">选择执行任务</div>
+          <div class="task-list">
+            <button
+              v-for="t in tasks" :key="t.id"
+              type="button" class="task-opt" :class="{ sel: t.id === form.task_id }"
+              @click="pickTask(t)"
+            >
+              <span class="to-name">{{ t.display_name }}</span>
+              <span class="to-sub">{{ t.groups.join(' → ') }}</span>
+              <span v-if="t.id === form.task_id" class="to-check"><GIcon name="check" :size="14" /></span>
+            </button>
+            <div v-if="!tasks.length" class="empty-hint">未获取到任务列表<br>请确认已配对 Windows 设备</div>
+          </div>
+          <div class="sheet-actions">
+            <button class="btn btn-secondary" @click="taskPicker = false">取消</button>
           </div>
         </div>
       </div>
@@ -301,16 +377,54 @@ button.btn-block { margin-top: var(--space-3); }
   background: rgba(59, 74, 90, .4);
   display: flex; align-items: flex-end;
 }
-.sheet {
-  width: 100%; background: var(--surface);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
-  max-height: 85%; overflow-y: auto;
+.overlay.center { align-items: center; justify-content: center; padding: var(--space-5); }
+.picker-card {
+  width: 100%; max-width: 320px; background: var(--surface);
+  border-radius: var(--radius-lg); padding: var(--space-4);
+  box-shadow: var(--shadow-float);
   animation: sheetUp .22s ease-out;
 }
 @keyframes sheetUp { from { transform: translateY(40%); opacity: .5; } to { transform: none; opacity: 1; } }
-.sheet-title { font-size: var(--font-lg); font-weight: 700; margin-bottom: var(--space-3); }
-.field { margin-bottom: var(--space-3); }
+.picker-title { font-size: var(--font-md); font-weight: 700; text-align: center; margin-bottom: var(--space-3); }
+.tp-row { display: flex; align-items: center; justify-content: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.tp-colon { font-size: var(--font-xl); font-weight: 700; color: var(--text-2); }
+.tp-select {
+  min-height: 52px; padding: 0 14px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--surface-2); color: var(--text-1);
+  font-size: var(--font-lg); font-weight: 600; font-family: var(--font-mono);
+  outline: none; appearance: none; -webkit-appearance: none;
+  text-align: center; text-align-last: center;
+}
+.tp-select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-weak); }
+.sheet {
+  width: 100%; background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 6px var(--space-4) 0;
+  max-height: 82dvh;
+  display: flex; flex-direction: column;
+  animation: sheetUp .22s ease-out;
+}
+.sheet-grip {
+  width: 40px; height: 4px; border-radius: 2px;
+  background: var(--border-strong); margin: 6px auto var(--space-2);
+  flex-shrink: 0;
+}
+.sheet-title { font-size: var(--font-lg); font-weight: 700; margin-bottom: var(--space-3); flex-shrink: 0; }
+.sheet-actions {
+  /* sticky 底部操作条：iOS 小屏/键盘弹起时按钮固定可见，绝不随内容滚出屏幕 */
+  position: sticky; bottom: 0;
+  display: flex; gap: var(--space-3);
+  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
+  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sheet-actions .btn { flex: 1; }
+.sheet > .field, .sheet > .task-list, .sheet > .warn { flex-shrink: 0; }
+.sheet { overflow-y: auto; }
+.task-list { overflow-y: visible; }
 .field > label { display: block; font-size: var(--font-sm); color: var(--text-2); margin-bottom: 5px; }
 .field input[type="text"], .field input[type="time"], .field select {
   width: 100%; min-height: 44px;
@@ -325,7 +439,36 @@ button.btn-block { margin-top: var(--space-3); }
 .field.row .check { display: flex; align-items: center; gap: 8px; font-size: var(--font-base); color: var(--text-1); }
 .field.row .check input { width: 18px; height: 18px; accent-color: var(--brand); }
 .warn { margin-top: 5px; font-size: var(--font-xs); color: var(--warning); }
-.sheet-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
-.sheet-actions .btn { flex: 1; }
+
+/* 自绘选择器（触发时间/执行任务）：模拟 iOS 风格列表行，点开子弹层，规避原生
+   select/time input 在 Windows/Android/iOS 上样式不一致的问题 */
+.select-sim {
+  width: 100%; min-height: 44px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  padding: 0 12px; font-size: var(--font-base);
+  background: var(--surface); color: var(--text-1);
+}
+.select-sim:active { background: var(--surface-2); }
+.ss-value { flex: 1; text-align: left; font-weight: 500; }
+.ss-value.dim { color: var(--text-3); }
+.ss-arrow { color: var(--text-3); font-size: 18px; line-height: 1; }
+
+/* 任务选择列表 */
+.task-list { margin-bottom: var(--space-2); }
+.task-opt {
+  width: 100%; min-height: 52px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  position: relative;
+  border: none; border-bottom: 1px solid var(--border);
+  background: var(--surface); text-align: left;
+  padding: 8px 30px 8px 4px;
+}
+.task-opt:last-of-type { border-bottom: none; }
+.task-opt:active { background: var(--surface-2); }
+.task-opt.sel { background: var(--brand-weak); }
+.to-name { font-size: var(--font-base); font-weight: 600; color: var(--text-1); }
+.to-sub { font-size: var(--font-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.to-check { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: var(--brand-strong); }
 .spinner-dark { border-color: rgba(125, 117, 102, .35); border-top-color: var(--text-2); }
 </style>

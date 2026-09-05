@@ -6,7 +6,9 @@ import SettingsPage from './pages/SettingsPage.vue'
 import SchedulesPage from './pages/SchedulesPage.vue'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // base 必须与挂载路径一致：缺省时 /spa/schedules 深链匹配不到任何路由，
+  // 被 pathMatch 兜底重定向回 /（真实踩坑：SPA 上线以来深链/刷新一直回首页）。
+  history: createWebHistory('/spa/'),
   routes: [
     { path: '/', name: 'status', component: StatusPage },
     { path: '/tasks', name: 'tasks', component: TasksPage },
