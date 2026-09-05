@@ -152,21 +152,25 @@ function menuRemove(t: BgiTask): void {
       </div>
       <template v-else>
         <div v-for="t in tasks" :key="t.id" class="task-wrap">
-          <TaskCard :task="t" @triggered="onTriggered" />
-          <div class="kebab-wrap" @click.stop>
-            <button class="kebab-btn" aria-label="任务操作" @click="toggleMenu(t.id, $event)">
-              <span></span><span></span><span></span>
-            </button>
-            <Teleport to="body">
-              <template v-if="menuFor === t.id">
-                <div class="menu-mask" @click="closeMenu"></div>
-                <div class="menu-pop" :style="{ top: menuPos.top + 'px', right: menuPos.right + 'px' }">
-                  <button class="menu-item" @click="menuEdit(t)">编辑任务</button>
-                  <button class="menu-item danger" @click="menuRemove(t)">删除任务</button>
-                </div>
-              </template>
-            </Teleport>
-          </div>
+          <TaskCard :task="t" @triggered="onTriggered">
+            <!-- 竖三点：作为卡片头行的末尾元素（与执行按钮同行 flex 排开，不重叠） -->
+            <template #actions>
+              <div class="kebab-wrap" @click.stop>
+                <button class="kebab-btn" aria-label="任务操作" @click="toggleMenu(t.id, $event)">
+                  <span></span><span></span><span></span>
+                </button>
+              </div>
+            </template>
+          </TaskCard>
+          <Teleport to="body">
+            <template v-if="menuFor === t.id">
+              <div class="menu-mask" @click="closeMenu"></div>
+              <div class="menu-pop" :style="{ top: menuPos.top + 'px', right: menuPos.right + 'px' }">
+                <button class="menu-item" @click="menuEdit(t)">编辑任务</button>
+                <button class="menu-item danger" @click="menuRemove(t)">删除任务</button>
+              </div>
+            </template>
+          </Teleport>
         </div>
       </template>
 
@@ -226,11 +230,11 @@ function menuRemove(t: BgiTask): void {
 .plus { font-size: 16px; font-weight: 700; line-height: 1; margin-right: 2px; }
 .task-wrap { position: relative; }
 
-/* 竖三点菜单按钮（卡片右上角） */
-.kebab-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
+/* 竖三点菜单按钮：卡片头行内元素（与执行按钮同行排开，不重叠） */
+.kebab-wrap { flex-shrink: 0; display: inline-flex; }
 .kebab-btn {
-  width: 30px; height: 30px; border: none; border-radius: 50%;
-  background: var(--surface-2);
+  width: 32px; height: 44px; border: none; border-radius: var(--radius-md);
+  background: none;
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px; transition: background .15s, transform .06s;
 }
@@ -310,7 +314,7 @@ function menuRemove(t: BgiTask): void {
 .field input, .field textarea {
   width: 100%; min-height: 44px;
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  padding: 10px 12px; font-size: var(--font-base);
+  padding: 10px 12px; font-size: 16px; /* ≥16px 防 iOS 聚焦自动缩放 */
   background: var(--surface); color: var(--text-1); outline: none;
   font-family: inherit;
 }

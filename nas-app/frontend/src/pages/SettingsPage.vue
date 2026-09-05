@@ -305,7 +305,7 @@ onMounted(async () => {
 .field-row input {
   flex: 1; min-width: 0; min-height: 44px;
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  padding: 0 12px; font-size: var(--font-base);
+  padding: 0 12px; font-size: 16px; /* ≥16px 防 iOS 聚焦自动缩放 */
   font-family: var(--font-mono);
   background: var(--surface); color: var(--text-1);
   outline: none;

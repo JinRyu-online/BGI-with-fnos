@@ -96,11 +96,15 @@ onMounted(async () => {
   border: 1px solid var(--border); border-radius: var(--radius-full);
   background: var(--surface); color: var(--text-2);
   font-size: var(--font-sm); font-weight: 500;
+  /* chip 是原子块：不许内部断行、不许被压缩——iOS（CJK 文本任意字符可断）
+     上"刷新"两字被折成两行的问题即源于此 */
+  white-space: nowrap; flex-shrink: 0;
   transition: all .15s;
 }
 /* 扩大触控热区到 ≥44px（视觉 36px，命中区域外扩 4px） */
 .chip::after { content: ''; position: absolute; inset: -4px; }
 .chip.active { background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 600; }
 .chip-refresh { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.chip-refresh svg { flex-shrink: 0; }
 .spinner-dark { border-color: rgba(100, 116, 139, .35); border-top-color: var(--text-2); }
 </style>

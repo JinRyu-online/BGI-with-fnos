@@ -21,6 +21,15 @@ input { font-family: inherit; }
 a { color: inherit; text-decoration: none; }
 [hidden] { display: none !important; }
 
+/* iOS Safari：input/textarea/select 聚焦时若 font-size < 16px 会自动放大页面。
+   所有表单控件统一 16px（微信/QQ 等成熟移动 Web App 的标准做法），
+   视觉差异极小，换来聚焦不缩放的稳定体验。 */
+input, textarea, select { font-size: 16px; }
+@media (min-width: 700px) {
+  /* 桌面端无自动缩放行为，可维持设计字号 */
+  input, textarea, select { font-size: var(--font-base); }
+}
+
 /* ---------- 桌面端：手机框式外观 ---------- */
 .desktop-note {
   display: none;

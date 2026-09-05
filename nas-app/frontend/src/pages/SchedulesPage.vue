@@ -296,15 +296,14 @@ function useConfigReady(): boolean {
           </div>
         </div>
 
-        <!-- 时间选择：照成熟 App（iOS 时钟/闹钟编辑）双列滚轮 + 顶部文字按钮。
-             同样 Teleport 到 body，避免滚动容器问题。 -->
+        <!-- 时间选择：照成熟 App 惯例——底部 sheet，仅右上角 √ 确认（无左右文字按钮），
+             取消 = 点遮罩或拖拽心理预期，样式与全应用弹层统一 -->
         <div v-if="timePicker" class="overlay" @click.self="timePicker = false">
           <div class="sheet sheet-compact">
             <div class="sheet-grip"></div>
             <div class="sheet-head">
-              <button class="text-btn" @click="timePicker = false">取消</button>
               <div class="sheet-title-sm">触发时间</div>
-              <button class="text-btn primary" @click="applyTime">确定</button>
+              <button class="sheet-ok" aria-label="确定" @click="applyTime">✓</button>
             </div>
             <div class="tp-row">
               <select v-model.number="tpHour" class="tp-select">
@@ -420,11 +419,6 @@ button.btn-block { margin-top: var(--space-3); }
 }
 .sheet-title { flex: 1; font-size: var(--font-lg); font-weight: 700; }
 .sheet-title-sm { flex: 1; text-align: center; font-size: var(--font-md); font-weight: 700; }
-.text-btn {
-  border: none; background: none; padding: 6px 4px;
-  font-size: var(--font-base); color: var(--text-2); min-width: 52px;
-}
-.text-btn.primary { color: var(--brand-strong); font-weight: 600; }
 .sheet-close {
   flex-shrink: 0;
   width: 28px; height: 28px; border: none; border-radius: 50%;
@@ -433,6 +427,16 @@ button.btn-block { margin-top: var(--space-3); }
   display: inline-flex; align-items: center; justify-content: center;
 }
 .sheet-close:active { background: var(--danger-weak); color: var(--danger); }
+/* 右上角 √ 确认按钮（时间选择等轻量选择弹层用；取消 = 点遮罩） */
+.sheet-ok {
+  flex-shrink: 0;
+  width: 28px; height: 28px; border: none; border-radius: 50%;
+  background: var(--brand); color: #fff;
+  font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .06s, background .15s;
+}
+.sheet-ok:active { transform: scale(.92); background: var(--brand-pressed); }
 /* 内容区滚动；操作条在 sheet 末尾（flex 布局，永远可见——非 sticky hack） */
 .sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
 .sheet-actions {
@@ -449,7 +453,7 @@ button.btn-block { margin-top: var(--space-3); }
 .field input[type="text"] {
   width: 100%; min-height: 44px;
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  padding: 0 12px; font-size: var(--font-base);
+  padding: 0 12px; font-size: 16px; /* ≥16px 防 iOS 聚焦自动缩放 */
   background: var(--surface); color: var(--text-1); outline: none;
   font-family: inherit;
 }
