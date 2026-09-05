@@ -21,6 +21,8 @@ import iconHistory from './assets/tabicons/history.png'
 import iconHistoryGray from './assets/tabicons/history_gray.png'
 import iconSettings from './assets/tabicons/settings.png'
 import iconSettingsGray from './assets/tabicons/settings_gray.png'
+import iconSchedules from './assets/tabicons/schedules.png'
+import iconSchedulesGray from './assets/tabicons/schedules_gray.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +37,7 @@ const deviceChip = computed(() => {
 const tabs = [
   { path: '/', icon: iconStatus, iconGray: iconStatusGray, label: '状态' },
   { path: '/tasks', icon: iconTasks, iconGray: iconTasksGray, label: '任务' },
+  { path: '/schedules', icon: iconSchedules, iconGray: iconSchedulesGray, label: '定时' },
   { path: '/history', icon: iconHistory, iconGray: iconHistoryGray, label: '历史' },
   { path: '/settings', icon: iconSettings, iconGray: iconSettingsGray, label: '设置' },
 ] as const

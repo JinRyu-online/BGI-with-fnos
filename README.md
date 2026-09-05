@@ -151,9 +151,9 @@ Windows 监听器暴露 8 个端点（协议细节见 [`windows-listener/api/ope
 
 除 `/health`、`/key`、WS 外，都需要 `Authorization: Bearer <api_key>`。
 
-NAS 应用自身的代理接口：`/api/scan` `/api/pair` `/api/tasks` `/api/trigger` `/api/status` `/api/abort` `/api/stop` `/api/wol` `/api/jobs` `/api/discover-key` `/api/ws/logs/{job_id}`（WS 同源代理——浏览器**不直连** Windows，规避 HTTPS mixed content 与防火墙问题）。
+NAS 应用自身的代理接口：`/api/scan` `/api/pair` `/api/tasks` `/api/trigger` `/api/status` `/api/abort` `/api/stop` `/api/wol` `/api/jobs` `/api/discover-key` `/api/schedules`（GET/PUT 定时任务 + `/{id}/run` 手动执行 + `/{id}/state` 运行状态）`/api/ws/logs/{job_id}`（WS 同源代理——浏览器**不直连** Windows，规避 HTTPS mixed content 与防火墙问题）。
 
-Web GUI 为移动端优先 SPA（`/` 自动跳转 `/spa/`，源码 [`nas-app/frontend/`](nas-app/frontend/)，Vue3+TS；底部导航用原神 Q 版角色表情图标）。NAS 后台每 30s 自动对账：浏览器关闭后运行中的历史任务也会被刷成终态，不再卡"运行中"。设置页支持 WOL 一键唤醒（需填目标机 MAC）。
+Web GUI 为移动端优先 SPA（`/` 自动跳转 `/spa/`，源码 [`nas-app/frontend/`](nas-app/frontend/)，Vue3+TS；底部导航用原神 Q 版角色表情图标，含独立「定时」页）。**定时任务**：NAS 端按「周几 + 时刻」自动 WOL 唤醒 → 等 listener 就绪 → 触发指定任务（原神矿物 48-72h 刷新场景），详见 [`docs/定时任务方案.md`](docs/定时任务方案.md)；容器 TZ=Asia/Shanghai（Dockerfile 已装 tzdata）。NAS 后台每 30s 自动对账：浏览器关闭后运行中的历史任务也会被刷成终态，不再卡"运行中"。设置页支持 WOL 一键唤醒（需填目标机 MAC）。
 
 ## 安全模型
 

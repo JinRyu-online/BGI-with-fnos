@@ -157,6 +157,16 @@ class WolBody(BaseModel):
     """为空时回退到配置 target_mac；两者都空返回 400。"""
 
 
+class SchedulesBody(BaseModel):
+    """PUT /api/schedules 请求体：整体替换列表（与 config.schedules 同构）。
+
+    必须定义在模块级：main.py 启用 `from __future__ import annotations`，
+    注解是字符串，FastAPI 解析时在模块命名空间找模型——闭包内定义的类
+    会被当成 query 参数（真实踩坑：PUT 422 "query body missing"）。
+    """
+    schedules: list[dict]
+
+
 def _default_config_path() -> str:
     """配置文件路径：容器内由 compose 注入 BGI_DATA_DIR=/data；
     开发环境回退到源码旁的 etc/config.json。"""
@@ -188,6 +198,11 @@ def create_app(
     history_path: str | None = None,
     reconcile_interval: float | None = 30.0,
     reconciler_factory: Callable[[Callable[[], object], "HistoryStore"], Callable[[], None]] | None = None,
+    scheduler_interval: float | None = 30.0,
+    state_path: str | None = None,
+    wake_fn: Callable[[str], None] | None = None,
+    health_probe_fn: Callable[[ListenerClient], bool] | None = None,
+    scheduler_injector: Callable[[Callable[[], object], Callable[[], dict]], object] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用。
 
@@ -198,15 +213,31 @@ def create_app(
       reconcile_interval         -> 后台对账循环间隔秒数；0 或 None 禁用
       reconciler_factory(client_getter, history) -> tick 可调用对象（每轮执行一次）；
                                     默认 None 用内置 _default_reconcile_tick。
+      scheduler_interval         -> 定时调度循环间隔秒数；0 或 None 禁用
+      state_path                 -> 定时任务运行状态文件路径（schedules_state.json）
+      wake_fn(mac)               -> WOL 唤醒动作（默认 wol.send_magic_packet）
+      health_probe_fn(client)    -> listener 就绪探测（默认 client.health() 可达即 True）
+      scheduler_injector(client_getter, state_getter) -> Scheduler 实例（完全替换内置调度器）
 
     后台对账：lifespan 启动 daemon 线程，每 reconcile_interval 秒把 history 中
     running/completing 的记录向监听器查询一遍，终态/404 落盘，根治"浏览器一关
     历史就永远卡 running"。线程通过 stop event 退出，event.wait 保证退出快。
+
+    定时调度：lifespan 再起一个 daemon 线程，每 scheduler_interval 秒调
+    Scheduler.tick(now)：发现到期 schedule 投递独立 worker 执行
+    （health 探测 → WOL → 等 listener 就绪 → trigger），不阻塞 tick 循环。
     """
+    from scheduler import (
+        Scheduler,
+        ScheduleStateStore,
+        default_state_path,
+    )
+
     settings = Settings(config_path)
     history = HistoryStore(history_path or default_history_path())
     scan_fn = scanner or _default_scanner
     client_fn = client_factory or _default_client_factory
+    schedule_state = ScheduleStateStore(state_path or default_state_path())
 
     # ---------- 后台对账（reconcile）----------
 
@@ -259,10 +290,121 @@ def create_app(
 
     reconcile_tick = reconciler_factory(_client_from_config, history) if reconciler_factory else _reconcile_tick
 
+    # ---------- 定时任务（scheduler）----------
+
+    _wake = wake_fn  # None 时执行链内延迟 import wol（与 api_wol 的 patch 目标一致）
+
+    def _default_wake(mac: str) -> None:
+        from wol import send_magic_packet
+        # 连发 3 包：UDP 广播不可靠（交换机可能丢弃全局广播）
+        last_err: Exception | None = None
+        for _ in range(3):
+            try:
+                send_magic_packet(mac)
+                return
+            except OSError as e:  # noqa: PERF203 - 重试间隔下再试
+                last_err = e
+                time.sleep(0.5)
+        raise last_err if last_err else OSError("wake failed")
+
+    def _default_health_probe(client: ListenerClient) -> bool:
+        try:
+            client.health()
+            return True
+        except Exception:
+            return False
+
+    def _execute_schedule(sched: dict) -> None:
+        """定时任务执行链（独立 worker 线程内运行，阻塞不影 tick 循环）：
+        health 探测（PC 已醒则短路）→ WOL → 等 listener 就绪 → trigger。
+        所有失败分支统一落 state + history，绝不排队重试。"""
+        import threading as _threading  # noqa: F401 - 本函数运行于 worker 线程
+        sid = sched.get("id", "?")
+        fired_wall = time.time()
+        try:
+            client, cfg = _client_from_config()
+        except _Unpaired:
+            schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                        result="error", error="未配对设备")
+            return
+        try:
+            # 1. 就绪探测：PC 已醒则跳过 WOL 与等待
+            ready = health_probe_fn(client) if health_probe_fn else _default_health_probe(client)
+            if not ready:
+                # 2. WOL 唤醒（wake=false 表示 PC 常开，不再重试唤醒直接进等待）
+                if sched.get("wake", True):
+                    mac = cfg.get("target_mac") or ""
+                    if not mac:
+                        schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                                    result="error", error="未配置 MAC，无法唤醒")
+                        return
+                    wake = _wake or _default_wake
+                    try:
+                        wake(mac)
+                    except Exception as e:  # ValueError/OSError 统一落失败
+                        schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                                    result="wake_failed", error=str(e))
+                        return
+                # 3. 轮询 /health 等 listener 就绪（Windows 开机+自启 listener 通常 <2 分钟）
+                timeout = int(sched.get("wake_timeout_sec", 300))
+                deadline = time.time() + timeout
+                while time.time() < deadline:
+                    if health_probe_fn(client) if health_probe_fn else _default_health_probe(client):
+                        ready = True
+                        break
+                    time.sleep(3)
+                if not ready:
+                    schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                                result="wake_timeout", error=f"{timeout}s 内 listener 未就绪")
+                    return
+                # listener 刚起来时 TaskRegistry 热加载可能未完成：就绪后小缓冲
+                time.sleep(1.0)
+            # 4. 触发（409=Windows 忙 → 跳过；404 → 重试一次再失败才落 task_not_found）
+            task_id = sched.get("task_id", "")
+            try:
+                result = client.trigger(task_id)
+            except ListenerNotFound:
+                time.sleep(2.0)
+                try:
+                    result = client.trigger(task_id)
+                except ListenerNotFound:
+                    schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                                result="task_not_found", error=f"任务不存在：{task_id}")
+                    return
+            except ListenerError as e:
+                msg = str(e)
+                if "409" in msg or "busy" in msg.lower():
+                    schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                                result="skipped_busy", error="Windows 正在运行任务，本次跳过")
+                    return
+                raise
+            job_id = result.get("job_id", "")
+            t0 = time.time()
+            # 与手动触发同构：落盘第一快照，带 schedule_id 溯源
+            history.record({
+                "job_id": job_id,
+                "task_id": task_id,
+                "display_name": result.get("display_name") or sched.get("name") or task_id,
+                "state": "running",
+                "created_at": t0,
+                "finished_at": None,
+                "schedule_id": sid,
+            })
+            schedule_state.record_fired(sid, fired_at=fired_wall, job_id=job_id, result="triggered")
+            log.info("scheduler: schedule=%s triggered job=%s", sid, job_id)
+        except Exception as e:  # 任何未预期异常都落 state，绝不中断调度循环
+            log.exception("scheduler: execute schedule=%s failed", sid)
+            schedule_state.record_fired(sid, fired_at=fired_wall, job_id=None,
+                                        result="error", error=str(e))
+
+    def _build_scheduler(client_getter, state_getter) -> "Scheduler":
+        return Scheduler(client_getter, state_getter, execute_fn=_execute_schedule)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         stop_event = threading.Event()
         thread: threading.Thread | None = None
+        sched_thread: threading.Thread | None = None
         if reconcile_interval:
             def _loop() -> None:
                 while not stop_event.is_set():
@@ -274,12 +416,27 @@ def create_app(
 
             thread = threading.Thread(target=_loop, name="bgi-reconcile", daemon=True)
             thread.start()
+        if scheduler_interval:
+            def _sched_loop() -> None:
+                from datetime import datetime
+                while not stop_event.is_set():
+                    try:
+                        scheduler.tick(datetime.now(), settings.load().get("schedules", []))
+                    except Exception:
+                        log.exception("scheduler tick crashed (will retry next round)")
+                    stop_event.wait(scheduler_interval)
+
+            sched_thread = threading.Thread(target=_sched_loop, name="bgi-scheduler", daemon=True)
+            sched_thread.start()
         try:
             yield
         finally:
             if thread is not None:
                 stop_event.set()
                 thread.join(timeout=5.0)
+            if sched_thread is not None:
+                stop_event.set()
+                sched_thread.join(timeout=5.0)
 
     app = FastAPI(title="BetterGI Trigger NAS 应用", lifespan=lifespan)
     # 挂载静态目录，供 index.html 引用 /static/bgi_icon.png 作为标题图标
@@ -320,6 +477,10 @@ def create_app(
             raise _Unpaired()
         url = f"http://{target['ip']}:{target['port']}"
         return client_fn(url, cfg["api_key"]), cfg
+
+    # 定时调度器（必须在 _client_from_config 定义之后构建——执行链闭包引用它）
+    scheduler = scheduler_injector(_client_from_config, lambda: schedule_state) if scheduler_injector \
+        else _build_scheduler(_client_from_config, lambda: schedule_state)
 
     # ---------- 页面 ----------
 
@@ -599,6 +760,98 @@ def create_app(
         except OSError as e:
             raise HTTPException(status_code=502, detail=f"魔术包发送失败：{e}")
         return {"sent": True, "mac": mac}
+
+    # ---------- 定时任务（schedules）----------
+
+    def _schedules_with_meta(cfg: dict | None = None) -> list[dict]:
+        """读 schedules 并附运行元数据（next_fire_at / last_* ）。"""
+        from datetime import datetime
+        from scheduler import next_fire_at
+        cfg = cfg or settings.load()
+        state = schedule_state.all()
+        now = datetime.now()
+        out = []
+        for s in cfg.get("schedules", []):
+            item = dict(s)
+            nf = next_fire_at(now, s.get("time", ""), s.get("weekdays"))
+            item["next_fire_at"] = nf.timestamp() if nf else None
+            st = state.get(s.get("id", "")) or {}
+            item["last_fired_at"] = st.get("last_fired_at")
+            item["last_result"] = st.get("last_result")
+            item["last_error"] = st.get("last_error")
+            out.append(item)
+        return out
+
+    @app.get("/api/schedules")
+    def api_schedules_list() -> list[dict]:
+        """定时任务列表（含下次触发时刻与上次执行结果）。"""
+        return _schedules_with_meta()
+
+    @app.put("/api/schedules")
+    def api_schedules_put(body: SchedulesBody) -> list[dict]:
+        """整体替换定时任务列表（前端编辑后全量回传）。
+
+        校验：每条必须过 validate_schedule；task_id 做软校验（Windows 可达时
+        校验存在性，不可达不阻断保存——离线也能编辑）。
+        """
+        from scheduler import validate_schedule
+        for i, s in enumerate(body.schedules):
+            errs = validate_schedule(s)
+            if errs:
+                raise HTTPException(status_code=400, detail=f"第 {i + 1} 条：{'；'.join(errs)}")
+        # 软校验 task_id（不阻断）
+        try:
+            client, _ = _client_from_config()
+            try:
+                known = {t.get("id") for t in client.tasks()}
+                unknown = [s.get("task_id") for s in body.schedules
+                           if s.get("task_id") not in known]
+                if unknown:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"任务不存在：{', '.join(map(str, unknown))}（Windows 端 tasks/*.json 已变更？）",
+                    )
+            except ListenerError:
+                pass  # Windows 离线：跳过软校验
+        except _Unpaired:
+            pass
+        cfg = settings.load()
+        cfg["schedules"] = body.schedules
+        settings.save(cfg)
+        # 清理已删除 schedule 的残留状态
+        keep_ids = {s.get("id") for s in body.schedules}
+        for sid in list(schedule_state.all().keys()):
+            if sid not in keep_ids:
+                schedule_state.drop(sid)
+        return _schedules_with_meta(cfg)
+
+    @app.post("/api/schedules/{schedule_id}/run")
+    def api_schedules_run(schedule_id: str) -> dict:
+        """手动立即执行一条定时任务（与定时触发走同一条执行链）。
+
+        直接同步投递 worker（不判断到点窗口）；返回前记录 dispatched，
+        worker 完成后覆盖为最终结果。
+        """
+        cfg = settings.load()
+        sched = next((s for s in cfg.get("schedules", []) if s.get("id") == schedule_id), None)
+        if sched is None:
+            raise HTTPException(status_code=404, detail="定时任务不存在")
+        threading.Thread(
+            target=_execute_schedule, args=(dict(sched),),
+            name=f"bgi-sched-run-{schedule_id}", daemon=True,
+        ).start()
+        schedule_state.record_fired(
+            schedule_id, fired_at=time.time(), job_id=None, result="dispatched",
+        )
+        return {"dispatched": True, "id": schedule_id}
+
+    @app.get("/api/schedules/{schedule_id}/state")
+    def api_schedules_state(schedule_id: str) -> dict:
+        """单条定时任务的运行状态（轮询手动 run 的最终结果用）。"""
+        st = schedule_state.get(schedule_id)
+        if st is None:
+            raise HTTPException(status_code=404, detail="无运行记录")
+        return st
 
     # ---------- 实时日志 WS 代理（薄透传，消息不解析转换） ----------
 

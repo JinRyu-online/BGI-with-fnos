@@ -30,6 +30,9 @@ DEFAULT_CONFIG: dict = {
     "poll": {
         "interval_sec": 10,        # 触发后轮询 /status 的间隔
     },
+    # 定时任务列表（list 整体覆盖语义：用户配置的数组原样生效）。
+    # 元素结构见 docs/定时任务方案.md：{id, enabled, name, time, weekdays, task_id, wake, wake_timeout_sec, skip_if_busy}
+    "schedules": [],
 }
 
 

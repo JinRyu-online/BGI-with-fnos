@@ -7,6 +7,7 @@
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
   ScanProgress, DeviceInfo, DiscoverKeyAck, AbortAck, StopAck, WolAck,
+  ScheduleItem,
 } from '../types'
 
 export class MockHttpError extends Error {
@@ -233,6 +234,34 @@ export const mockApi = {
     await sleep(300)
     const m = mac || MOCK_CONFIG.target_mac
     return { sent: true, mac: m }
+  },
+
+  async getSchedules(): Promise<ScheduleItem[]> {
+    await sleep(120)
+    return [
+      { id: 's1', enabled: true, name: '挖矿一条龙', time: '12:00', weekdays: [0, 3],
+        task_id: 't3', wake: true, wake_timeout_sec: 300, skip_if_busy: true,
+        next_fire_at: Date.now() / 1000 + 86400, last_fired_at: Date.now() / 1000 - 86400 * 3,
+        last_result: 'triggered', last_error: null },
+      { id: 's2', enabled: false, name: '每日日常', time: '04:10', weekdays: [],
+        task_id: 't1', wake: false, wake_timeout_sec: 300, skip_if_busy: true,
+        next_fire_at: null, last_fired_at: null, last_result: null, last_error: null },
+    ]
+  },
+
+  async putSchedules(): Promise<ScheduleItem[]> {
+    await sleep(200)
+    return this.getSchedules()
+  },
+
+  async runSchedule(id: string): Promise<{ dispatched: boolean; id: string }> {
+    await sleep(150)
+    return { dispatched: true, id }
+  },
+
+  async scheduleState(_id: string): Promise<{ last_fired_at: number | null; last_job_id: string | null; last_result: string; last_error: string | null }> {
+    await sleep(80)
+    return { last_fired_at: Date.now() / 1000 - 60, last_job_id: 'mock-job', last_result: 'triggered', last_error: null }
   },
 
   async unpair(): Promise<void> {

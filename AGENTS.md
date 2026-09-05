@@ -65,6 +65,8 @@ main.py             create_app 工厂（scanner/client_factory/history_path 均�
 discovery.py        网卡枚举 → CIDR → 并行 TCP 探活 + /health 识别（service=="bgi-trigger"）
 listener_client.py  ListenerClient：Windows 端 typed 客户端（ListenerAuthError/ListenerError）
 history.py          HistoryStore：jobs.json 按 job_id 去重更新、截断 50 条
+scheduler.py        定时任务：next_fire_at/is_due 纯函数 + ScheduleStateStore + Scheduler.tick
+                    （到期判定 naive 本地时间；状态独立 schedules_state.json，勿并进 config.json）
 settings.py         Settings：config.json 深度合并 DEFAULT_CONFIG
 ```
 
@@ -100,6 +102,8 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 **进程控制**：`POST /stop` 强制清理（terminate→wait 5s→kill，kill_processes 在 execution.py）；`/abort` 置信号 + 杀 BetterGI（`execution.abort_kills_game=true` 时连游戏）。`CompletionMonitor` 维护 seen_game 标志对账：BetterGI 消失且游戏从未出现过 → `failed`（防卡 24h）。
 
 **NAS 前端 SPA（nas-app/frontend/）**：Vite+Vue3+TS，`base: '/spa/'`，构建产物经 `npm run build:deploy` 复制到 `app/docker/app/static/spa/`，由 main.py `app.mount("/spa", StaticFiles(html=True))` 服务；`/` 直接 307 跳转 `/spa/`（旧 Jinja GUI 已删除），`/spa/{路由}` 深链/刷新由先于 Mount 注册的 fallback 路由兜底回 index.html（**Starlette 按注册顺序匹配，Mount 在前会吃掉深链**）。tab 栏图标为原神 Q 版表情（`frontend/src/assets/tabicons/`，换图直接替换同名 PNG）。WS 一律走同源代理 `/api/ws/logs/{job_id}`（main.py 薄透传，websockets 库连上游），**严禁浏览器直连 Windows IP**（HTTPS mixed content 教训）。NAS 端后台对账循环（lifespan 启动，`reconcile_interval` 注入，0=禁用）持续把 running/completing 历史刷成终态——浏览器关闭不再卡"运行中"。`TERMINAL_STATES` 三端（state.py / listener_client.py / frontend constants.ts）逐字对齐，改一处必须同步另两处。
+
+**定时任务（scheduler.py + /api/schedules）**：lifespan 第二个 daemon 线程（`scheduler_interval` 注入，0=禁用）每轮调 `Scheduler.tick(now, schedules)`——tick 同步可直测，执行链（health 探测→WOL×3→等就绪→trigger）在独立 worker 线程。到期判定是 naive 本地时间，**容器必须 TZ=Asia/Shanghai 且镜像装 tzdata（slim 默认没有）**。防重入窗口判据：`last_fired_at < 触发点 <= now`，错过超 5 分钟不补跑；同 tick 多条到期只投第一条。`PUT /api/schedules` 是整体替换语义，**运行状态（last_fired_at 等）存独立 `schedules_state.json`**（Settings.save 无锁，勿写进 config.json）。FastAPI 请求体模型必须在模块级定义——`from __future__ import annotations` 下闭包内定义的模型会被当成 query 参数（422）。触发的历史记录带 `schedule_id`（history.py fallback 已保留该字段）。
 
 ## 关键约定与陷阱（改代码前必读）
 

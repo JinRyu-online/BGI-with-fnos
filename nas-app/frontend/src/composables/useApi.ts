@@ -9,7 +9,7 @@ import { MockHttpError, mockApi } from '../mock/server'
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
   ScanAck, ScanProgress, DeviceInfo, DiscoverKeyAck,
-  AbortAck, StopAck, WolAck,
+  AbortAck, StopAck, WolAck, ScheduleItem,
 } from '../types'
 
 export interface ApiError extends Error {
@@ -103,6 +103,29 @@ export const api = {
   wol(mac?: string): Promise<WolAck> {
     if (mockEnabled) return mockApi.wol(mac)
     return request<WolAck>('POST', '/api/wol', mac ? { mac } : {})
+  },
+
+  getSchedules(): Promise<ScheduleItem[]> {
+    if (mockEnabled) return mockApi.getSchedules()
+    return request<ScheduleItem[]>('GET', '/api/schedules')
+  },
+
+  putSchedules(schedules: ScheduleItem[]): Promise<ScheduleItem[]> {
+    if (mockEnabled) return mockApi.putSchedules()
+    // 回传时剥掉运行元数据（后端只收 config.schedules 结构）
+    const slim = schedules.map(({ next_fire_at, last_fired_at, last_result, last_error, ...rest }) => rest)
+    return request<ScheduleItem[]>('PUT', '/api/schedules', { schedules: slim })
+  },
+
+  runSchedule(id: string): Promise<{ dispatched: boolean; id: string }> {
+    if (mockEnabled) return mockApi.runSchedule(id)
+    return request<{ dispatched: boolean; id: string }>('POST', `/api/schedules/${encodeURIComponent(id)}/run`)
+  },
+
+  scheduleState(id: string): Promise<{ last_fired_at: number | null; last_job_id: string | null; last_result: string; last_error: string | null }> {
+    if (mockEnabled) return mockApi.scheduleState(id)
+    return request<{ last_fired_at: number | null; last_job_id: string | null; last_result: string; last_error: string | null }>(
+      'GET', `/api/schedules/${encodeURIComponent(id)}/state`)
   },
 }
 

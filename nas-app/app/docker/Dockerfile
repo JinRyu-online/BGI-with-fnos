@@ -4,7 +4,12 @@
 # 持久化数据经 docker-compose 挂载到 /data（BGI_DATA_DIR）。
 FROM python:3.12-slim
 
+# tzdata：slim 镜像默认不带；不装它 ENV TZ 不生效，定时任务会按 UTC 触发（差 8 小时）
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV BGI_DATA_DIR=/data \
+    TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
