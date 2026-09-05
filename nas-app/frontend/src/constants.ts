@@ -58,12 +58,20 @@ export function isTerminalState(state: string | null | undefined): boolean {
   return TERMINAL_STATES.includes(state ?? '')
 }
 
-/** 收尾动作 → 文案（照原型 AFTER_LABEL）。 */
+/** 收尾动作 → 文案（图标用 GIcon name，见 components/GIcon.vue）。 */
 export const AFTER_DONE_LABEL: Record<string, string> = {
-  sleep: '💤 休眠',
-  shutdown: '⏻ 关机',
-  lock: '🔒 锁屏',
-  none: '⏸ 不操作',
+  sleep: '休眠',
+  shutdown: '关机',
+  lock: '锁屏',
+  none: '不操作',
+}
+
+/** 收尾动作 → GIcon 图标名。 */
+export const AFTER_DONE_ICON: Record<string, string> = {
+  sleep: 'moon',
+  shutdown: 'power',
+  lock: 'lock',
+  none: 'pause',
 }
 
 /** completion_reason → 中文（照 gui-design/旧版 GUI 语义）。 */

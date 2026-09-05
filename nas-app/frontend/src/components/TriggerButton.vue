@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
  * 触发按钮三态（照原型 §4.4）：
- * - 默认：btn-primary "▶ 执行"
+ * - 默认：btn-primary "执行"
  * - loading：本卡触发请求进行中，spinner + "触发中"
  * - 运行中禁用：btn-secondary "运行中，不可触发"（全局单活互斥）
  */
 import { computed, ref } from 'vue'
 import { hasActiveJob, jobState, triggerTask } from '../composables/useJob'
 import { toast } from '../composables/useToast'
+import GIcon from './GIcon.vue'
 
 const props = defineProps<{ taskId: string }>()
 const emit = defineEmits<{ triggered: [] }>()
@@ -50,7 +51,7 @@ async function onClick(): Promise<void> {
     v-if="mode === 'idle'"
     class="btn btn-primary tc-run"
     @click="onClick"
-  >▶ 执行</button>
+  ><GIcon name="play" :size="14" /> 执行</button>
   <button v-else-if="mode === 'loading'" class="btn btn-primary tc-run" disabled>
     <span class="spinner"></span>触发中
   </button>

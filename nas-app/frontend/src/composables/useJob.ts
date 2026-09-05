@@ -24,6 +24,8 @@ export interface ActiveJob {
   completionReason: string
   /** 任务开始时刻（Unix 秒），0 表示未开始（triggering 中） */
   createdAtSec: number
+  /** 终态冻结时刻（Unix 秒）：首次落入终态时记下，之后"总用时"不再增长 */
+  finishedAtSec?: number
 }
 
 interface JobStateStore {
@@ -78,6 +80,11 @@ function setJobState(state: string, reason = ''): void {
   if (!jobState.job) return
   jobState.job.state = (Object.hasOwn(JOB_STATE_MAP, state) ? state : 'unknown') as JobState
   if (reason) jobState.job.completionReason = reason
+  // 首次落入终态时冻结结束时刻（乐观 abort / WS / 轮询三路都经过这里），
+  // 否则"总用时"会继续按 Date.now() 增长
+  if (isTerminalState(jobState.job.state) && !jobState.job.finishedAtSec) {
+    jobState.job.finishedAtSec = Date.now() / 1000
+  }
 }
 
 function handleTerminal(state: string, reason: string, opts: { notify?: boolean } = {}): void {

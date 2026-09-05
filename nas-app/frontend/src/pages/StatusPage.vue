@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import StatusDot from '../components/StatusDot.vue'
 import LogPanel from '../components/LogPanel.vue'
 import Skeleton from '../components/Skeleton.vue'
+import GIcon from '../components/GIcon.vue'
 import { useJob, reasonZh, forceStop, abortJob } from '../composables/useJob'
 import { logStreamState } from '../composables/useLogStream'
 import { showConfirm } from '../composables/useConfirm'
@@ -52,8 +53,10 @@ function tick(): void {
       timerText.value = ''
     }
   } else if (isTerminalState(st) && job) {
-    const elapsed = job.createdAtSec ? (jobState.jobGone ? 0 : Date.now() / 1000 - job.createdAtSec) : 0
-    // 终态冻结：优先用 created→finished/now 的差值（页面刷新后也不归零）
+    // 终态冻结：用冻结的 finishedAtSec（abort/WS/轮询落终态时刻），
+    // 其次用后端记录的 finished_at；都没有才用当前时刻兜底（不再持续增长）
+    const endSec = job.finishedAtSec ?? (job.createdAtSec ? Date.now() / 1000 : 0)
+    const elapsed = job.createdAtSec && !jobState.jobGone ? Math.max(0, endSec - job.createdAtSec) : 0
     timerText.value = '总用时 ' + mmss(elapsed)
   } else {
     timerText.value = ''
@@ -90,7 +93,7 @@ async function onCleanup(): Promise<void> {
   }
 }
 
-const cleaningLabel = computed(() => (cleaning.value ? '清理中…' : '🧹 强制清理'))
+const cleaningLabel = computed(() => (cleaning.value ? '清理中…' : '强制清理'))
 const reasonText = computed(() => reasonZh(jobState.job?.completionReason ?? ''))
 
 onMounted(() => {
@@ -122,7 +125,7 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
 
       <!-- 空闲占位 / 当前任务卡 -->
       <div v-if="!active" class="card">
-        <div class="empty-hint">当前没有运行中的任务<br>去「任务」页选择任务，点击 ▶ 执行</div>
+        <div class="empty-hint">当前没有运行中的任务<br>去「任务」页选择任务，点击"执行"</div>
       </div>
       <div v-else class="card">
         <div class="sec-title" style="margin:0 0 4px;">当前任务</div>
@@ -146,9 +149,9 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
           :class="{ 'btn-attention': currentState === 'completing' }"
           :disabled="!canAbort"
           @click="onAbort"
-        >⏹ 中止</button>
+        ><GIcon name="stop" :size="14" /> 中止</button>
         <button class="btn btn-danger" :disabled="cleaning" @click="onCleanup">
-          <span v-if="cleaning" class="spinner"></span>{{ cleaningLabel }}
+          <span v-if="cleaning" class="spinner"></span><GIcon v-else name="broom" :size="14" />{{ cleaningLabel }}
         </button>
       </div>
     </template>
