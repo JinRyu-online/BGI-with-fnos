@@ -66,7 +66,7 @@ python -m pytest app/docker/tests/ -q
 ```
 listener.py  (装配所有依赖 + tkinter 密钥弹窗 + uvicorn 启动)
   └── (absolute import) bgi_trigger/
-      ├── api/app.py            → FastAPI 七接口(/health /key /tasks /trigger /status /abort + /ws/logs/{job_id})
+      ├── api/app.py            → FastAPI 八接口(/health /key /tasks /trigger /status /abort /bgi/groups + /ws/logs/{job_id})
       ├── service/
       │   ├── auth.py           →  AuthState: api_key 校验 + IP 自动学习白名单
       │   └── config.py         →  ListenerConfig: TOML + 默认值 + 首启生成密钥并回写

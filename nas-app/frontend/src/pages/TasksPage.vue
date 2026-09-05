@@ -3,6 +3,8 @@
  * 任务页 /tasks：TaskCard 列表；触发成功跳状态页（轮询+WS 已在 useJob 启动）。
  * 任务编辑：右上"编辑"进入管理模式 → 底部弹层表单（名称/组链/超时/收尾动作）
  * → 整体 PUT /api/tasks（Windows 写回 tasks 文件，热加载生效）。
+ * 组链双轨：GET /api/bgi-groups 非空 → checkbox 勾选（勾选顺序=执行顺序，
+ * 已删组显示"未知组：<名>"保存原样带回）；空/失败 → 手写 textarea fallback。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -21,7 +23,7 @@ const error = ref('')
 
 const editing = ref(false) // 编辑弹层
 const saving = ref(false)
-const groupsText = ref('') // 组链编辑用逗号/换行分隔文本
+const groupsText = ref('') // 组链编辑用逗号/换行分隔文本（fallback 模式）
 const form = reactive({
   id: '',
   display_name: '',
@@ -30,6 +32,52 @@ const form = reactive({
 })
 const editingId = ref('') // ''=新建
 const isNew = computed(() => !editingId.value)
+
+/* ---- 调度组编排（双轨）：接口非空 → checkbox chip 勾选（勾选顺序=执行顺序）；
+   接口空/失败 → 原手写 textarea。存量 groups 中已删的组显示"未知组：<名>"
+   且保持勾选，保存原样带回——绝不静默丢弃。 ---- */
+const bgiGroups = ref<string[]>([]) // 接口返回的可用组名
+const groupsMode = ref<'picker' | 'text'>('text') // picker=勾选列表 / text=手写
+const selectedGroups = ref<string[]>([]) // 勾选顺序即执行顺序（含"未知组：<名>"）
+const groupsLoading = ref(false)
+
+/** 勾选/取消一个组：追加到末尾（=排到最后执行）或从已选中移除。 */
+function toggleGroup(name: string): void {
+  const i = selectedGroups.value.indexOf(name)
+  if (i >= 0) selectedGroups.value.splice(i, 1)
+  else selectedGroups.value.push(name)
+}
+
+/** 已选行的展示名："未知组：X" chip 用 X 原名。 */
+function selectedDisplayName(name: string): string {
+  return name.startsWith('未知组：') ? name.slice('未知组：'.length) : name
+}
+
+/** 打开编辑器时并行拉取调度组：成功非空 → picker，否则保留 text。 */
+async function loadBgiGroups(): Promise<void> {
+  groupsLoading.value = true
+  try {
+    const { groups } = await api.getBgiGroups()
+    bgiGroups.value = groups
+    groupsMode.value = groups.length ? 'picker' : 'text'
+  } catch {
+    bgiGroups.value = []
+    groupsMode.value = 'text'
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
+/** 把存量 groups 预填进勾选模型：在接口列表里的直接勾上（按存量顺序），
+    不在的追加为"未知组：<名>"保持勾选。 */
+function presetGroups(existing: string[]): void {
+  const selected: string[] = []
+  for (const g of existing) {
+    if (bgiGroups.value.includes(g)) selected.push(g)
+    else selected.push(`未知组：${g}`)
+  }
+  selectedGroups.value = selected
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -52,14 +100,27 @@ function openNew(): void {
   editingId.value = ''
   Object.assign(form, { display_name: '', timeout_min: 90, after_done: 'sleep' })
   groupsText.value = ''
+  selectedGroups.value = []
   editing.value = true
+  void loadBgiGroups()
 }
 
 function openEdit(t: BgiTask): void {
   editingId.value = t.id
   Object.assign(form, { display_name: t.display_name, timeout_min: t.timeout_min, after_done: t.after_done })
   groupsText.value = t.groups.join('、')
+  // 先打开弹层（picker/text 由接口返回决定），再预填勾选模型
+  selectedGroups.value = []
   editing.value = true
+  void loadBgiGroups().then(() => presetGroups(t.groups))
+}
+
+/** 当前表单的组名数组：picker 用勾选顺序（未知组还原原名），text 用解析结果。 */
+function currentGroups(): string[] {
+  if (groupsMode.value === 'picker') {
+    return selectedGroups.value.map(selectedDisplayName)
+  }
+  return parseGroups()
 }
 
 function parseGroups(): string[] {
@@ -71,8 +132,8 @@ function parseGroups(): string[] {
 
 async function save(): Promise<void> {
   if (!form.display_name.trim()) { toast('请填写任务名称', 'error'); return }
-  const groups = parseGroups()
-  if (!groups.length) { toast('至少填写一个调度组名', 'error'); return }
+  const groups = currentGroups()
+  if (!groups.length) { toast('至少选择/填写一个调度组名', 'error'); return }
   const item: BgiTask = {
     id: isNew.value ? `gui-${Date.now()}` : editingId.value,
     display_name: form.display_name.trim(),
@@ -180,6 +241,7 @@ function menuRemove(t: BgiTask): void {
           <div class="sheet">
             <div class="sheet-grip"></div>
             <div class="sheet-head">
+              <span class="sheet-head-spacer"></span>
               <div class="sheet-title">{{ isNew ? '新建任务' : '编辑任务' }}</div>
               <button class="sheet-close" aria-label="关闭" @click="editing = false">✕</button>
             </div>
@@ -189,11 +251,42 @@ function menuRemove(t: BgiTask): void {
                 <input v-model="form.display_name" type="text" placeholder="如：挖矿一条龙" maxlength="30">
               </div>
               <div class="field">
-                <label>BetterGI 调度组（顿号/逗号分隔，按顺序执行；须与「全自动-调度器」组名逐字一致）</label>
-                <textarea
-                  v-model="groupsText" rows="3"
-                  placeholder="如：日常一条龙、采矿、领取奖励、关闭游戏"
-                ></textarea>
+                <label>BetterGI 调度组（勾选顺序即执行顺序；须与「全自动-调度器」组名逐字一致）</label>
+                <!-- 轨 1：接口返回非空 → checkbox chip 多选 + 已选顺序 pill 行 -->
+                <template v-if="groupsMode === 'picker'">
+                  <div v-if="selectedGroups.length" class="picked-order">
+                    <span class="picked-label">执行顺序</span>
+                    <span v-for="(g, i) in selectedGroups" :key="g" class="picked-pill">
+                      <i class="picked-num">{{ i + 1 }}</i>{{ selectedDisplayName(g) }}
+                    </span>
+                  </div>
+                  <div class="group-list">
+                    <label
+                      v-for="g in bgiGroups" :key="g"
+                      class="group-row" :class="{ on: selectedGroups.includes(g) }"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="selectedGroups.includes(g)"
+                        @change="toggleGroup(g)"
+                      >
+                      <span class="group-name">{{ g }}</span>
+                      <span v-if="selectedGroups.includes(g)" class="group-ord">{{ selectedGroups.indexOf(g) + 1 }}</span>
+                    </label>
+                  </div>
+                  <button type="button" class="groups-switch" @click="groupsMode = 'text'">手动输入组名</button>
+                </template>
+                <!-- 轨 2：接口空/失败 → 原手写 textarea（fallback） -->
+                <template v-else>
+                  <textarea
+                    v-model="groupsText" rows="3"
+                    placeholder="未获取到 BetterGI 调度组，可手动输入组名（如：日常一条龙、采矿、领取奖励、关闭游戏）"
+                  ></textarea>
+                  <button
+                    v-if="bgiGroups.length" type="button" class="groups-switch"
+                    @click="groupsMode = 'picker'"
+                  >返回勾选列表</button>
+                </template>
               </div>
               <div class="field">
                 <label>超时上限（分钟，1-1440）</label>
@@ -289,15 +382,31 @@ function menuRemove(t: BgiTask): void {
   background: var(--border-strong); margin: 6px auto var(--space-1);
   flex-shrink: 0;
 }
-.sheet-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0 var(--space-2); flex-shrink: 0; }
-.sheet-title { flex: 1; font-size: var(--font-lg); font-weight: 700; }
+/* 标题行：grid 三槽 [44px 1fr 44px]——左右槽等宽保证标题严格居中，
+   中槽 min-width:0 + nowrap + ellipsis 防 320px 视口长标题撑破。
+   与 SchedulesPage 的 scoped 副本保持同步（弹层样式两处独立，漏一处即发散）。 */
+.sheet-head {
+  display: grid; grid-template-columns: 44px 1fr 44px; align-items: center;
+  padding: var(--space-1) 0 var(--space-2); flex-shrink: 0;
+}
+.sheet-head-spacer { width: 44px; }
+.sheet-title {
+  grid-column: 2;
+  min-width: 0; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--font-lg); font-weight: 700;
+}
+/* 右槽 ✕ 按钮：本体 28px 圆 + ::after 外扩 8px → 命中区 44px（触控约定） */
 .sheet-close {
+  grid-column: 3;
+  position: relative;
   flex-shrink: 0;
   width: 28px; height: 28px; border: none; border-radius: 50%;
   background: var(--surface-2); color: var(--text-3);
   font-size: 12px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.sheet-close::after { content: ''; position: absolute; inset: -8px; }
 .sheet-close:active { background: var(--danger-weak); color: var(--danger); }
 .sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
 .sheet-actions {
@@ -327,4 +436,63 @@ function menuRemove(t: BgiTask): void {
   background: var(--surface-2); color: var(--text-2); font-size: var(--font-sm);
 }
 .after-chip.on { background: var(--brand-weak); border-color: var(--brand); color: var(--brand-strong); font-weight: 600; }
+
+/* 调度组勾选列表（照 iOS 提醒事项多选清单）：行右对勾 + 顺序角标 */
+.group-list {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--surface);
+}
+.group-row {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 44px; padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  font-size: var(--font-base); color: var(--text-1);
+  cursor: pointer;
+}
+.group-row:last-child { border-bottom: none; }
+.group-row:active { background: var(--surface-2); }
+.group-row.on { background: var(--brand-weak); }
+/* label 原生点击即切换；热区由 44px 行高保证 */
+.group-row input[type="checkbox"] {
+  width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--brand);
+}
+.group-name {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.group-ord {
+  flex-shrink: 0;
+  min-width: 20px; height: 20px; border-radius: 10px;
+  background: var(--brand); color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;
+  padding: 0 5px;
+}
+/* 已选顺序 pill 行（执行顺序预览，① ② ③…） */
+.picked-order {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px;
+}
+.picked-label { font-size: var(--font-xs); color: var(--text-3); margin-right: 2px; }
+.picked-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%;
+  min-height: 24px; padding: 0 8px;
+  border: 1px solid rgba(165, 133, 74, .3); border-radius: var(--radius-full);
+  background: var(--brand-weak); color: var(--brand-strong);
+  font-size: var(--font-xs); font-weight: 600;
+}
+.picked-num {
+  font-style: normal;
+  min-width: 14px; height: 14px; border-radius: 7px;
+  background: var(--brand); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 14px; text-align: center;
+  padding: 0 3px;
+}
+.groups-switch {
+  margin-top: 6px;
+  border: none; background: none; padding: 6px 0;
+  font-size: var(--font-xs); color: var(--text-3);
+  text-decoration: underline;
+}
 </style>

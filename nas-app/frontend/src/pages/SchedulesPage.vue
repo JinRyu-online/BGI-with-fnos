@@ -245,6 +245,7 @@ function useConfigReady(): boolean {
           <div class="sheet">
             <div class="sheet-grip"></div>
             <div class="sheet-head">
+              <span class="sheet-head-spacer"></span>
               <div class="sheet-title">{{ editingIndex >= 0 ? '编辑定时任务' : '新建定时任务' }}</div>
               <button class="sheet-close" aria-label="关闭" @click="editing = false">✕</button>
             </div>
@@ -302,6 +303,7 @@ function useConfigReady(): boolean {
           <div class="sheet sheet-compact">
             <div class="sheet-grip"></div>
             <div class="sheet-head">
+              <span class="sheet-head-spacer"></span>
               <div class="sheet-title-sm">触发时间</div>
               <button class="sheet-ok" aria-label="确定" @click="applyTime">✓</button>
             </div>
@@ -323,6 +325,7 @@ function useConfigReady(): boolean {
           <div class="sheet sheet-compact">
             <div class="sheet-grip"></div>
             <div class="sheet-head">
+              <span class="sheet-head-spacer"></span>
               <div class="sheet-title-sm">选择执行任务</div>
               <button class="sheet-close" aria-label="关闭" @click="taskPicker = false">✕</button>
             </div>
@@ -411,24 +414,45 @@ button.btn-block { margin-top: var(--space-3); }
   background: var(--border-strong); margin: 6px auto var(--space-1);
   flex-shrink: 0;
 }
-/* 标题行：标题 + 右侧 ✕（编辑/选择弹层）；或左文字按钮 + 标题 + 右文字按钮（时间弹层） */
+/* 标题行：grid 三槽 [44px 1fr 44px]——左右槽等宽保证标题严格居中，
+   中槽 min-width:0 + nowrap + ellipsis 防 320px 视口长标题撑破。
+   右槽：编辑/选择弹层 = ✕ 关闭（.sheet-close）；时间弹层 = ✓ 确认（.sheet-ok）；
+   左槽仅占位（本页弹层无左槽内容）。 */
 .sheet-head {
-  display: flex; align-items: center; gap: var(--space-2);
+  display: grid; grid-template-columns: 44px 1fr 44px; align-items: center;
   padding: var(--space-1) 0 var(--space-2);
   flex-shrink: 0;
 }
-.sheet-title { flex: 1; font-size: var(--font-lg); font-weight: 700; }
-.sheet-title-sm { flex: 1; text-align: center; font-size: var(--font-md); font-weight: 700; }
+.sheet-head-spacer { width: 44px; }
+.sheet-title {
+  grid-column: 2;
+  min-width: 0; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--font-lg); font-weight: 700;
+}
+.sheet-title-sm {
+  grid-column: 2;
+  min-width: 0; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--font-md); font-weight: 700;
+}
+/* 右槽 ✕ 按钮：本体 28px 圆 + ::after 外扩 8px → 命中区 44px（触控约定） */
 .sheet-close {
+  grid-column: 3;
+  position: relative;
   flex-shrink: 0;
   width: 28px; height: 28px; border: none; border-radius: 50%;
   background: var(--surface-2); color: var(--text-3);
   font-size: 12px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.sheet-close::after { content: ''; position: absolute; inset: -8px; }
 .sheet-close:active { background: var(--danger-weak); color: var(--danger); }
-/* 右上角 √ 确认按钮（时间选择等轻量选择弹层用；取消 = 点遮罩） */
+/* 右上角 ✓ 确认按钮（时间选择等轻量选择弹层用；取消 = 点遮罩），
+   热区外扩同 .sheet-close（28 + 8*2 = 44px） */
 .sheet-ok {
+  grid-column: 3;
+  position: relative;
   flex-shrink: 0;
   width: 28px; height: 28px; border: none; border-radius: 50%;
   background: var(--brand); color: #fff;
@@ -436,6 +460,7 @@ button.btn-block { margin-top: var(--space-3); }
   display: inline-flex; align-items: center; justify-content: center;
   transition: transform .06s, background .15s;
 }
+.sheet-ok::after { content: ''; position: absolute; inset: -8px; }
 .sheet-ok:active { transform: scale(.92); background: var(--brand-pressed); }
 /* 内容区滚动；操作条在 sheet 末尾（flex 布局，永远可见——非 sticky hack） */
 .sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }

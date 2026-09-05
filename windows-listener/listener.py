@@ -4,13 +4,15 @@
   pythonw.exe listener.py            正常启动（由计划任务调用）
   python listener.py --show-key      重新弹出密钥窗口
 
-提供六个 HTTP 接口：
-  GET  /health   免鉴权，返回服务身份签名
-  GET  /key      免鉴权，返回 {api_key, hostname}（供 NAS 自动配对）
-  GET  /tasks    鉴权，返回任务清单
-  POST /trigger  鉴权，启动任务
-  GET  /status   鉴权，查询任务状态
-  POST /abort    鉴权，中止当前任务
+提供八个 HTTP 接口：
+  GET  /health     免鉴权，返回服务身份签名
+  GET  /key        免鉴权，返回 {api_key, hostname}（供 NAS 自动配对）
+  GET  /tasks      鉴权，返回任务清单
+  POST /trigger    鉴权，启动任务
+  GET  /status     鉴权，查询任务状态
+  POST /abort      鉴权，中止当前任务
+  POST /stop       鉴权，急停：清理残留进程
+  GET  /bgi/groups 鉴权，枚举 BetterGI 调度器已有组名
 
 启动流程：
   1. 加载 config.toml（首启自动生成密钥）与 tasks.json；
@@ -54,6 +56,28 @@ def _resolve_tasks_dir(config: ListenerConfig) -> Path:
     """解析任务清单目录：相对路径相对于 BASE_DIR，绝对路径原样使用。"""
     p = Path(config.tasks.dir)
     return p if p.is_absolute() else BASE_DIR / p
+
+
+def _make_bgi_groups_reader(config: ListenerConfig):
+    """构造 GET /bgi/groups 的默认组名枚举回调（DI 注入 app.py，端点层不碰配置）。
+
+    组名唯一来源是 bettergi.dir：<dir>/User/ScriptGroup/*.json 的文件名 stem
+    （BetterGI 一个调度组一个文件，组名即文件名，与 --startGroups 参数逐字一致）。
+    注意：不用 config_path 推导——config_path 指向 BetterGI 配置目录，
+    与 ScriptGroup 是两处。dir 为空或目录不存在/读取异常 → 返回 []。
+    """
+    dir_str = (config.bettergi.dir or "").strip()
+    if not dir_str:
+        return None  # 未配置安装目录：端点将返回空列表
+
+    def _read() -> list[str]:
+        group_dir = Path(dir_str).expanduser() / "User" / "ScriptGroup"
+        if not group_dir.is_dir():
+            return []
+        stems = sorted(p.stem for p in group_dir.glob("*.json") if p.is_file())
+        return stems
+
+    return _read
 
 log = logging.getLogger("bgi_trigger")
 
@@ -154,6 +178,8 @@ def main() -> int:
         # ★ 进程名匹配：BetterGI exe basename + game_processes
         bettergi_name=os.path.basename(config.bettergi.exe_path or ""),
         game_processes=list(config.bettergi.game_processes),
+        # ★ GET /bgi/groups 的组名枚举（bettergi.dir → User/ScriptGroup/*.json）
+        bgi_groups_reader=_make_bgi_groups_reader(config),
     )
     app = create_app(deps)
 

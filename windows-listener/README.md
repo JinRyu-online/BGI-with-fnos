@@ -15,7 +15,7 @@ core/
   log_harvester.py LogHarvester: 后台线程收割日志 + WS 实时推送（支持 glob 按天发现）
   tasks.py       任务清单（tasks.json，调度器组名 → 任务，热加载）
 api/
-  app.py         FastAPI 七接口（含 /ws/logs WebSocket）
+  app.py         FastAPI 八接口（含 /ws/logs WebSocket）
 listener.py     入口：装配依赖 + 密钥弹窗 + uvicorn
 ```
 
@@ -26,6 +26,7 @@ listener.py     入口：装配依赖 + 密钥弹窗 + uvicorn
 | GET | `/health` | 否 | `{"service":"bgi-trigger","hostname":...,"version":...}` 供 NAS 扫描识别 |
 | GET | `/key` | 否 | 返回 `{api_key, hostname}` 供 NAS 自动配对 |
 | GET | `/tasks` | 是 | 返回任务清单 |
+| GET | `/bgi/groups` | 是 | 枚举 BetterGI 调度器已有组名（`bettergi.dir` → `User/ScriptGroup/*.json` 文件名） |
 | POST | `/trigger` | 是 | `{"task_id":"daily"}` → `{"job_id":...}`（202），忙时 409 |
 | GET | `/status?job_id=` | 是 | 任务状态 |
 | POST | `/abort` | 是 | 中止当前任务（进入反悔窗口时阻止收尾） |

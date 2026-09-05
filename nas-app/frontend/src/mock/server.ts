@@ -148,6 +148,12 @@ export const mockApi = {
     return MOCK_TASKS.map(t => ({ ...t }))
   },
 
+  async getBgiGroups(): Promise<{ groups: string[] }> {
+    await sleep(120)
+    // 模拟 Windows 端 User/ScriptGroup 目录枚举结果
+    return { groups: ['日常一条龙', '每日委托', '领取奖励', '采矿', '尘歌壶', '好友助力', '关闭游戏'] }
+  },
+
   async putTasks(tasks: BgiTask[]): Promise<BgiTask[]> {
     await sleep(200)
     MOCK_TASKS.splice(0, MOCK_TASKS.length, ...tasks.map(t => ({ ...t })))

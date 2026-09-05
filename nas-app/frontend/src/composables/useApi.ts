@@ -50,6 +50,11 @@ export const api = {
     return request<BgiTask[]>('GET', '/api/tasks')
   },
 
+  getBgiGroups(): Promise<{ groups: string[] }> {
+    if (mockEnabled) return mockApi.getBgiGroups()
+    return request<{ groups: string[] }>('GET', '/api/bgi-groups')
+  },
+
   putTasks(tasks: BgiTask[]): Promise<BgiTask[]> {
     if (mockEnabled) return mockApi.putTasks(tasks)
     return request<BgiTask[]>('PUT', '/api/tasks', { tasks })

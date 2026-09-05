@@ -660,6 +660,28 @@ def create_app(
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"监听器不可达：{e}")
 
+    @app.get("/api/bgi-groups")
+    def api_bgi_groups() -> dict:
+        """代理拉取 Windows 监听器的 BetterGI 调度器组名（任务编排勾选用）。
+
+        错误映射：未配对 400；401 透传；404（旧版 listener 未升级）→ 返回
+        {"groups": []} 而非 502（旧版兼容：前端自然走手写 textarea fallback）；
+        其他 ListenerError → 502。
+        """
+        try:
+            client, _ = _client_from_config()
+        except _Unpaired:
+            raise HTTPException(status_code=400, detail="未配对设备，请先扫描配对")
+        try:
+            return {"groups": client.bgi_groups()}
+        except ListenerNotFound:
+            # 旧版监听器没有该端点：视为"无组列表"，前端走 fallback
+            return {"groups": []}
+        except ListenerAuthError:
+            raise HTTPException(status_code=401, detail="密钥失效，请重新配对")
+        except ListenerError as e:
+            raise HTTPException(status_code=502, detail=f"监听器不可达：{e}")
+
     @app.put("/api/tasks")
     def api_tasks_replace(body: TasksBody) -> list[dict]:
         """编辑任务清单：转发到 Windows 端 PUT /tasks（写回 tasks 文件，热加载生效）。

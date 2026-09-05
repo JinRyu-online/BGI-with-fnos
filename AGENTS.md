@@ -9,7 +9,7 @@
 - **windows-listener/** — Windows 端：FastAPI + uvicorn 监听 HTTP，守护线程拉起 `BetterGI.exe --startGroups <组名...>`，轮询完成判定，结束后执行休眠/关机等收尾动作。Python 3.11+（用内置 `tomllib`）。
 - **nas-app/** — NAS 端：飞牛 FPK Docker 应用（`network_mode: host`），FastAPI 单页 GUI，负责扫描发现、配对、触发、轮询状态、WebSocket 实时日志。Python 3.12 容器。
 
-两端通信：NAS 调 Windows 的 7 个端点（`/health` `/key` `/tasks` `/trigger` `/status` `/abort` + WS `/ws/logs/{job_id}`）；协议契约见 `windows-listener/api/openapi.yaml`。
+两端通信：NAS 调 Windows 的 8 个端点（`/health` `/key` `/tasks` `/trigger` `/status` `/abort` `/bgi/groups` + WS `/ws/logs/{job_id}`）；协议契约见 `windows-listener/api/openapi.yaml`。
 
 ## 常用命令
 
@@ -44,7 +44,7 @@ cd nas-app && ./build.sh               # 或 Windows: ./build.ps1；$env:FNPACK 
 
 ```
 bgi_trigger/
-├── api/app.py            FastAPI 路由（7 端点）。所有依赖经 AppDeps dataclass 注入
+├── api/app.py            FastAPI 路由（8 端点）。所有依赖经 AppDeps dataclass 注入
 ├── service/
 │   ├── auth.py           AuthState：Bearer 密钥校验 + IP 自动学习白名单（持久化 trusted.json）
 │   └── config.py         ListenerConfig：TOML 加载 + 默认值合并 + 首启生成密钥回写
@@ -156,7 +156,7 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 | 文档 | 内容 |
 |---|---|
 | `docs/开发方案.md` | 完整设计文档（中文），架构真相源 |
-| `windows-listener/api/openapi.yaml` | 监听器 7 端点协议契约 |
+| `windows-listener/api/openapi.yaml` | 监听器 8 端点协议契约 |
 | `windows-listener/README.md` / `nas-app/README.md` / `nas-app/打包说明.md` | 两端部署与打包细节 |
 | `docs/测试步骤.md` / `docs/测试注意事项.md` | 联调流程与避坑 |
 | `CLAUDE.md` | Claude Code 版指南（与本文内容相近） |

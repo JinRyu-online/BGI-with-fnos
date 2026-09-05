@@ -77,6 +77,16 @@ class ListenerClient:
         """GET /tasks，返回任务清单。"""
         return self._call("GET", "/tasks")
 
+    def bgi_groups(self) -> list[str]:
+        """GET /bgi/groups，返回 BetterGI 调度器已有组名列表。
+
+        旧版监听器（未升级）返回 404 → 映射 ListenerNotFound（代理层
+        据此兼容回退为空列表，前端自然走手写 textarea）。
+        """
+        data = self._call("GET", "/bgi/groups")
+        groups = data.get("groups", [])
+        return [str(g) for g in groups]
+
     def replace_tasks(self, tasks: list[dict]) -> list[dict]:
         """PUT /tasks，整体替换任务清单（Windows 端写回 tasks 文件）。
 

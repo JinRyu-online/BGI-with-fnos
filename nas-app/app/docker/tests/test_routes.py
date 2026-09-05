@@ -129,6 +129,42 @@ def test_tasks_unpaired_returns_400(tmp_path):
     assert r.status_code == 400
 
 
+def test_bgi_groups_returns_list(tmp_path):
+    """GET /api/bgi-groups 正常透传：返回 {"groups": [...]}。"""
+    fake = FakeClient()
+    fake.bgi_groups = lambda: ["日常一条龙", "挖矿", "关闭游戏"]
+    client = TestClient(_make(tmp_path, client=fake))
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 200
+    assert r.json() == {"groups": ["日常一条龙", "挖矿", "关闭游戏"]}
+
+
+def test_bgi_groups_unpaired_returns_400(tmp_path):
+    """未配对时 GET /api/bgi-groups 返回 400（与其他代理端点一致）。"""
+    client = TestClient(_make(tmp_path))
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 400
+
+
+def test_bgi_groups_old_listener_404_returns_empty(tmp_path):
+    """旧版监听器没有 /bgi/groups（404）→ 返回 {"groups": []} 而非 502。"""
+    fake = FakeClient()
+
+    def _raise_404():
+        from listener_client import ListenerNotFound
+        raise ListenerNotFound("not found: /bgi/groups")
+
+    fake.bgi_groups = _raise_404
+    client = TestClient(_make(tmp_path, client=fake))
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 200
+    assert r.json() == {"groups": []}
+
+
 def test_tasks_after_pair_returns_list(tmp_path):
     app = _make(tmp_path, client=FakeClient(tasks_data=[{"id": "daily", "display_name": "日常", "groups": ["g"], "timeout_min": 90, "after_done": "sleep"}]))
     c = TestClient(app)
