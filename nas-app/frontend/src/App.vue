@@ -128,8 +128,6 @@ onMounted(async () => {
   height: 26px;
   object-fit: contain;
   line-height: 1;
-  /* 透明底表情在浅色 tab 栏上加浅描边晕光，避免白色部分融入背景 */
-  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.18));
   transition: transform 0.15s;
 }
 .tab.active .tab-icon {
