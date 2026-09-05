@@ -122,3 +122,9 @@ export interface AbortAck { aborted: boolean }
 export interface StopAck { stopped: boolean; killed: string[] }
 export interface WolAck { sent: boolean; mac: string }
 export interface DiscoverKeyAck { api_key: string; hostname: string }
+
+/** GET /api/logs/{job_id} 响应：历史任务日志（strings，前端 classifyLog 分类） */
+export interface LogBundle {
+  job_id: string
+  lines: string[]
+}

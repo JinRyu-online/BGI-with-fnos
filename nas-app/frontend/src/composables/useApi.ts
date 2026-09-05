@@ -9,7 +9,7 @@ import { MockHttpError, mockApi } from '../mock/server'
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
   ScanAck, ScanProgress, DeviceInfo, DiscoverKeyAck,
-  AbortAck, StopAck, WolAck, ScheduleItem,
+  AbortAck, StopAck, WolAck, ScheduleItem, LogBundle,
 } from '../types'
 
 export interface ApiError extends Error {
@@ -98,6 +98,13 @@ export const api = {
   getJobs(): Promise<JobRecord[]> {
     if (mockEnabled) return mockApi.getJobs()
     return request<JobRecord[]>('GET', '/api/jobs')
+  },
+
+  /** 历史任务日志回看：tail 默认 1000、后端钳制上限 5000；404 = 无录制 */
+  getLogs(jobId: string, tail?: number): Promise<LogBundle> {
+    if (mockEnabled) return mockApi.getLogs(jobId, tail)
+    const q = tail ? `?tail=${tail}` : ''
+    return request<LogBundle>('GET', `/api/logs/${encodeURIComponent(jobId)}${q}`)
   },
 
   abort(): Promise<AbortAck> {

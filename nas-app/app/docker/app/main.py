@@ -4,6 +4,7 @@
   设备发现与配对（M3）：/api/scan  /api/pair  /api/unpair  /api/config
   任务触发与回报（M4）：/api/tasks  /api/trigger  /api/status  /api/jobs
   任务控制与运维：      /api/abort  /api/stop  /api/wol  /api/ws/logs/{job_id}
+  历史日志回看：        /api/logs/{job_id}（B2 录制落盘的读取接口）
 
 应用通过 create_app(...) 工厂构造，扫描器、监听器客户端工厂、历史路径均可注入，
 便于单元测试（用假扫描器/假客户端替代真实网络）。
@@ -14,6 +15,10 @@
 后台对账（reconcile）：lifespan 启动 daemon 线程，每 reconcile_interval 秒扫一遍
 history 中 running/completing 的记录并向监听器查询状态，终态落盘——修复"浏览器一关
 历史就永远卡 running"的问题（历史上还叠加过 "timeout" 拼错/漏 abnormal_exit 的事故）。
+
+历史日志录制（B2）：触发成功后（api_trigger 与 _execute_schedule 两条路）由 NAS
+后台 daemon 线程连 listener WS 录整场日志到 jobs_log/{job_id}.log，与用户在线与否
+解耦；WS 代理 tee 角色接管作为兜底（NAS 重启后 flag 丢失的场景）。
 """
 from __future__ import annotations
 
@@ -32,6 +37,7 @@ from pydantic import BaseModel
 
 from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
 from history import HistoryStore, default_history_path
+from job_log_store import JobLogStore, default_logs_dir, valid_job_id
 from listener_client import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -43,6 +49,23 @@ from listener_client import (
 from settings import Settings
 
 log = logging.getLogger("bgi_trigger.main")
+
+# ---------- 历史日志录制（B2 方案）常量 ----------
+
+# 录制兜底时长上限 = Windows 端 MAX_TASK_DURATION_SEC(24h, bgi_trigger/core/execution.py)
+# + 300s 缓冲。NAS 侧不查 task timeout_min（任务定义在 listener，触发响应不含它），
+# 用与 listener 相同的硬编码安全网上限兜底，防 B2 线程泄漏。
+RECORD_MAX_DURATION_SEC = 24 * 3600 + 300
+# B2 初始连接退避序列（秒）：listener 刚就绪时的瞬时失败常见
+_RECORD_CONNECT_BACKOFF_SEC = (1, 2, 5)
+# 录制中途重连退避序列（秒）：网络抖动恢复
+_RECORD_RECONNECT_BACKOFF_SEC = (1, 2, 5)
+
+
+def _sys_line(text: str) -> str:
+    """录制器写入的系统标记行（与前端 classifyLog 的 [系统] 前缀约定一致）。"""
+    return f"[系统] {text}"
+
 
 # ---------- 子网级扫描进度（模块级，线程安全） ----------
 _scan_lock = threading.Lock()
@@ -210,6 +233,7 @@ def create_app(
     scanner=None,
     client_factory=None,
     history_path: str | None = None,
+    logs_dir: str | None = None,
     reconcile_interval: float | None = 30.0,
     reconciler_factory: Callable[[Callable[[], object], "HistoryStore"], Callable[[], None]] | None = None,
     scheduler_interval: float | None = 30.0,
@@ -224,6 +248,7 @@ def create_app(
       scanner(ip, port)          -> 设备列表
       client_factory(url, key)   -> ListenerClient 实例
       history_path               -> 历史文件路径
+      logs_dir                   -> 历史日志落盘目录（jobs_log/{job_id}.log）
       reconcile_interval         -> 后台对账循环间隔秒数；0 或 None 禁用
       reconciler_factory(client_getter, history) -> tick 可调用对象（每轮执行一次）；
                                     默认 None 用内置 _default_reconcile_tick。
@@ -249,9 +274,123 @@ def create_app(
 
     settings = Settings(config_path)
     history = HistoryStore(history_path or default_history_path())
+    job_logs = JobLogStore(logs_dir or default_logs_dir())
     scan_fn = scanner or _default_scanner
     client_fn = client_factory or _default_client_factory
     schedule_state = ScheduleStateStore(state_path or default_state_path())
+
+    # ---------- 历史日志录制（B2）----------
+
+    def _start_recorder(job_id: str) -> None:
+        """触发成功后同步标记写者并投递 B2 录制 daemon 线程。
+
+        flag 置位时机（评审必须项）：在拿到 job_id 后、返回/投递前同步
+        set_recorder + try_acquire_recorder——凡 NAS 触发的 job，任何后续
+        tee 连接建立时 flag 必为 True，无竞态窗口。B2 线程 finally 里 release。
+        """
+        if not job_id or not valid_job_id(job_id):
+            return
+        # 同步置位 + 原子抢占是一件事：set_recorder(True) 就是写者登记本身，
+        # 任何后续 tee 连接建立时 flag 必为 True，无竞态窗口（评审必须项）。
+        # 已有写者（重复触发/tee 先接管）→ 不重复投递录制线程。
+        if not job_logs.set_recorder(job_id, True):
+            return
+        threading.Thread(
+            target=_record_ws_worker, args=(job_id,),
+            name=f"bgi-recorder-{job_id}", daemon=True,
+        ).start()
+
+    def _record_ws_worker(job_id: str) -> None:
+        """B2 录制线程入口：独立事件循环跑 _record_ws，异常兜底释放写者。"""
+        try:
+            asyncio.run(_record_ws(job_id))
+        except Exception:
+            log.exception("recorder: record job=%s crashed", job_id)
+        finally:
+            job_logs.release_recorder(job_id)
+
+    async def _record_ws(job_id: str) -> None:
+        """连 listener WS 录整场日志到 jobs_log/{job_id}.log。
+
+        - 初始连接短退避重试 1s/2s/5s 共 3 次；耗尽写失败标记后放弃
+          （定时任务凌晨触发、用户不在线也录全——与在线与否解耦）。
+        - 收帧 {"ts","lines"} 落盘；{"last":true} 正常停；{"error":...}
+          写中断标记后停（listener 重启即此路径——不假设录制是全量）。
+        - 兜底时长上限 RECORD_MAX_DURATION_SEC（24h+300s，对齐 listener）。
+        - 中途断开且未收 last/error → 退避重连恢复；恢复后写"接续"标记行，
+          不做按内容去重（WS 协议无持久 seq，重放必然发生，去重必误伤）。
+        """
+        import json as _json
+
+        cfg = settings.load()
+        target = cfg.get("default_target")
+        if not target:
+            job_logs.append_lines(job_id, [_sys_line("日志录制失败：NAS 未配对设备")])
+            return
+        url = f"ws://{target['ip']}:{target['port']}/ws/logs/{job_id}"
+        deadline = time.time() + RECORD_MAX_DURATION_SEC
+        first_connect = True
+
+        async def _connect(backoffs) -> object | None:
+            """按退避序列尝试连接；全部耗尽返回 None。"""
+            import websockets
+            for delay in backoffs:
+                try:
+                    return await websockets.connect(url, open_timeout=5)
+                except Exception:
+                    if delay == backoffs[-1]:
+                        return None
+                    await asyncio.sleep(delay)
+            return None
+
+        while time.time() < deadline:
+            backoffs = _RECORD_CONNECT_BACKOFF_SEC if first_connect else _RECORD_RECONNECT_BACKOFF_SEC
+            upstream = await _connect(backoffs)
+            if upstream is None:
+                if first_connect:
+                    job_logs.append_lines(job_id, [_sys_line("日志录制失败：无法连接监听器")])
+                    return
+                # 中途重连耗尽：留标记后放弃（不算崩溃）
+                job_logs.append_lines(job_id, [_sys_line("日志录制中断：连接监听器失败")])
+                return
+            if not first_connect:
+                job_logs.append_lines(job_id, [_sys_line("录制接续，可能重复最近缓冲")])
+            first_connect = False
+            try:
+                async for msg in upstream:
+                    if time.time() >= deadline:
+                        return
+                    if isinstance(msg, bytes):
+                        continue
+                    try:
+                        frame = _json.loads(msg)
+                    except ValueError:
+                        continue  # 非 JSON 帧静默跳过（协议外内容不影响落盘）
+                    if frame.get("error"):
+                        job_logs.append_lines(
+                            job_id,
+                            [_sys_line(f"日志录制中断：{frame.get('error', '未知错误')}")],
+                        )
+                        return
+                    lines = frame.get("lines")
+                    if isinstance(lines, list):
+                        text_lines = [ln for ln in lines if isinstance(ln, str)]
+                        if text_lines:
+                            job_logs.append_lines(job_id, text_lines)
+                    if frame.get("last"):
+                        return  # 正常结束
+            except Exception:
+                # 网络抖动断开且未收 last/error → 退避重连恢复录制
+                if time.time() >= deadline:
+                    return
+                await asyncio.sleep(_RECORD_RECONNECT_BACKOFF_SEC[0])
+                continue
+            # 上游流正常结束但未见 last/error（listener 侧干净关闭）：
+            # 视同中断路径，写标记后停，不无限重连
+            job_logs.append_lines(job_id, [_sys_line("日志录制中断：连接已关闭")])
+            return
+        job_logs.append_lines(job_id, [_sys_line("日志录制中断：到达兜底时长上限")])
+
 
     # ---------- 后台对账（reconcile）----------
 
@@ -405,6 +544,8 @@ def create_app(
                 "schedule_id": sid,
             })
             schedule_state.record_fired(sid, fired_at=fired_wall, job_id=job_id, result="triggered")
+            # B2 录制：返回/投递前同步置位写者标记并投递录制线程（评审必须项）
+            _start_recorder(job_id)
             log.info("scheduler: schedule=%s triggered job=%s", sid, job_id)
         except Exception as e:  # 任何未预期异常都落 state，绝不中断调度循环
             log.exception("scheduler: execute schedule=%s failed", sid)
@@ -467,8 +608,10 @@ def create_app(
         @app.get("/spa/{rest:path}", include_in_schema=False)
         def spa_fallback(rest: str) -> FileResponse:
             # 真实资产文件（assets/*.js、favicon.png 等）直接返回该文件；
-            # assets/ 下不存在的文件 404（资产缺失要暴露，不能静默回 HTML）；
-            # 其余单段无扩展名路径视为前端 history 路由，回退 index.html。
+            # assets/ 下不存在的文件 404（资产缺失要暴露，不能静默回 HTML）。
+            # 两段 history 路由（/spa/logs/{id} 等）：末段无扩展名 → 回退
+            # index.html（刷新深链不 404）；末段带已知资产扩展名 → 404
+            # （缺失的 .js/.css 要暴露，回 HTML 会让浏览器拿到解析错误更难排查）。
             candidate = (_SPA_DIR / rest).resolve()
             if (
                 rest
@@ -477,7 +620,11 @@ def create_app(
                 and candidate.is_relative_to(_SPA_DIR.resolve())
             ):
                 return FileResponse(candidate)
-            if "/" in rest or rest.endswith((".png", ".js", ".css", ".ico", ".map", ".webp")):
+            _ASSET_EXTS = (".js", ".css", ".png", ".ico", ".map", ".webp", ".json", ".svg", ".woff2")
+            if "/" in rest and not rest.rsplit("/", 1)[-1].endswith(_ASSET_EXTS):
+                # 两段及以上路由：末段无资产扩展名 → 前端 history 路由
+                return FileResponse(_SPA_INDEX)
+            if rest.endswith(_ASSET_EXTS):
                 raise HTTPException(status_code=404)
             return FileResponse(_SPA_INDEX)
 
@@ -730,6 +877,9 @@ def create_app(
             "created_at": t0,                         # 触发时刻;用于前端计算执行时间
             "finished_at": None,
         })
+        # B2 录制：返回前同步置位写者标记并投递录制线程（评审必须项——
+        # 前端收到 202 后立即 openLogStream，tee 连接建立时 flag 必已为 True）
+        _start_recorder(job_id)
         result["display_name"] = display_name
         result["created_at"] = t0                    # 一并返回,前端可立即显示
         return result
@@ -762,6 +912,22 @@ def create_app(
     def api_jobs() -> list[dict]:
         """返回 NAS 端任务历史（最新在前）。"""
         return history.all()
+
+    @app.get("/api/logs/{job_id}")
+    def api_job_logs(job_id: str, tail: int = 1000) -> dict:
+        """历史任务日志回看：读 NAS 端录制落盘的 {BGI_DATA_DIR}/jobs_log/{job_id}.log。
+
+        - job_id 白名单 ^[A-Za-z0-9_-]+$（与 path_for / WS 代理三处同用），非法 400；
+        - tail 默认 1000、上限 5000（钳制），无"全部"模式（移动端渲染与内存保护）；
+          前端"加载更多"递增 tail 分页取更早内容；
+        - 文件不存在 → 404（无录制：log_path 未配置 / 旧任务 / 录制失败）。
+        """
+        if not valid_job_id(job_id):
+            raise HTTPException(status_code=400, detail="非法 job_id")
+        n = max(1, min(tail, 5000))
+        if not job_logs.has_log(job_id):
+            raise HTTPException(status_code=404, detail="无日志记录")
+        return {"job_id": job_id, "lines": job_logs.read_tail(job_id, n)}
 
     @app.post("/api/abort")
     def api_abort() -> dict:
@@ -911,17 +1077,27 @@ def create_app(
     # ---------- 实时日志 WS 代理（薄透传，消息不解析转换） ----------
 
     @app.websocket("/api/ws/logs/{job_id}")
+    @app.websocket("/api/ws/logs/{job_id}")
     async def api_ws_logs(websocket: WebSocket, job_id: str) -> None:
         """代理浏览器与 Windows 监听器 ws://{ip}:{port}/ws/logs/{job_id} 之间的连接。
 
         上游消息均为 JSON 文本帧（{"ts","lines"} / {"state",...} / {"last":true} / {"error"}），
-        原样透传不做解析。异常统一发一条 {"error": ...} 后关闭。
+        原样透传不做解析（tee 路径 try-parse 失败静默跳过）。异常统一发一条 {"error": ...} 后关闭。
+
+        tee 角色接管（历史日志回看）：上游连接成功后 try_acquire_recorder——
+        成功者（NAS 重启后 flag 丢失、job 仍在跑的场景）本连接生命周期内独占写盘，
+        断开时 release_recorder；失败者（B2 在录）纯透传不写盘。
         """
         cfg = settings.load()
         target = cfg.get("default_target")
         await websocket.accept()
         if not target:
             await websocket.send_text('{"error": "unpaired"}')
+            await websocket.close()
+            return
+        if not valid_job_id(job_id):
+            # 白名单三处同用之一：拼上游 URL 前先校验，防 URL 注入/路径穿越
+            await websocket.send_text('{"error": "invalid job_id"}')
             await websocket.close()
             return
         upstream_url = f"ws://{target['ip']}:{target['port']}/ws/logs/{job_id}"
@@ -935,6 +1111,11 @@ def create_app(
             await websocket.close()
             return
 
+        # tee 角色仲裁：成功 → 本连接独占写盘；失败 → B2 在录，纯透传。
+        # 注意不在此处提前释放：标记由 _start_recorder 同步置位，本连接
+        # acquire 失败说明写者另有其人，本连接断开也不能清别人的标记。
+        tee_owner = job_logs.try_acquire_recorder(job_id)
+
         async def pump_upstream_to_client() -> None:
             try:
                 async for msg in upstream:
@@ -942,6 +1123,8 @@ def create_app(
                         await websocket.send_bytes(msg)
                     else:
                         await websocket.send_text(msg)
+                        if tee_owner:
+                            _tee_try_append(job_id, msg)
             finally:
                 await upstream.close()
 
@@ -980,6 +1163,28 @@ def create_app(
                 await websocket.close()
             except Exception:
                 pass
+            if tee_owner:
+                job_logs.release_recorder(job_id)  # 断开释放写者（tee 生命周期结束）
+
+    def _tee_try_append(job_id: str, msg: str) -> None:
+        """tee 写盘：try-parse {"ts","lines"} 帧，失败静默跳过（协议外内容）。"""
+        import json as _json
+        try:
+            frame = _json.loads(msg)
+        except ValueError:
+            return
+        lines = frame.get("lines") if isinstance(frame, dict) else None
+        if isinstance(lines, list):
+            text_lines = [ln for ln in lines if isinstance(ln, str)]
+            if text_lines:
+                try:
+                    job_logs.append_lines(job_id, text_lines)
+                except OSError:
+                    log.warning("ws proxy: tee append failed for job=%s", job_id)
+
+    # 测试钩子：暴露日志 store 与录制启动器（测试经 app.state 驱动 B2 路径）
+    app.state.job_logs = job_logs
+    app.state.start_recorder = _start_recorder
 
     return app
 

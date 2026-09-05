@@ -7,7 +7,9 @@ const paths = [
   '/spa/src/pages/StatusPage.vue', '/spa/src/pages/TasksPage.vue',
   '/spa/src/pages/SchedulesPage.vue',
   '/spa/src/pages/HistoryPage.vue', '/spa/src/pages/SettingsPage.vue',
-  '/spa/src/components/LogPanel.vue', '/spa/src/composables/useJob.ts',
+  '/spa/src/components/LogPanel.vue', '/spa/src/components/LogBody.vue',
+  '/spa/src/pages/LogDetailPage.vue', '/spa/src/composables/useLogHistory.ts',
+  '/spa/src/composables/useJob.ts',
   '/spa/src/constants.ts', '/spa/src/styles/tokens.css',
 ]
 let fail = 0

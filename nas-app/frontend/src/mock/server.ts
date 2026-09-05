@@ -7,7 +7,7 @@
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
   ScanProgress, DeviceInfo, DiscoverKeyAck, AbortAck, StopAck, WolAck,
-  ScheduleItem,
+  ScheduleItem, LogBundle,
 } from '../types'
 
 export class MockHttpError extends Error {
@@ -222,6 +222,23 @@ export const mockApi = {
       finished_at: st.finished_at,
       elapsed: st.elapsed,
     }]
+  },
+
+  /** 历史日志回看 mock：返回假行（前端可离线开发详情页）。job 不存在 → 404。 */
+  async getLogs(jobId: string, tail?: number): Promise<LogBundle> {
+    await sleep(200)
+    const cur = job
+    if (!cur || cur.id !== jobId) throw new MockHttpError(404, '无日志记录')
+    const n = Math.min(tail ?? 1000, 5000)
+    const all = [
+      ...LOG_SCRIPT.map(l => l.replace('{name}', cur.displayName)),
+      '[调度] ✔ 全部调度组执行完毕',
+    ]
+    // tail 语义与后端一致：取末 n 行（mock 行数不足以测"加载更多"，循环填充到 1200 行）
+    while (all.length < 1200) {
+      all.push(`[调度] 补充行 ${all.length}：日常巡检正常，无异常事件`)
+    }
+    return { job_id: jobId, lines: all.slice(Math.max(0, all.length - n)) }
   },
 
   async abort(): Promise<AbortAck> {

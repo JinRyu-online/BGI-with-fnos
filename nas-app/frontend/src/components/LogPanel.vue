@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /**
  * 实时日志面板（深色，照原型 ① 状态页 log-panel）
+ * - 日志展示体抽为 LogBody 组件（与详情页共用，样式不复制）
  * - 自动滚动：距底 ≤40px 跟随；>40px 判定上滑暂停 + 悬浮"↓ 回到底部"
  * - 行缓冲 400 行（裁剪在 useLogStream 内做），角标显示总行数
  * - WS 状态点：connecting 黄闪 / connected 绿 / error 红 / closed 灰
  */
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { logStreamState, wsStatusText } from '../composables/useLogStream'
+import LogBody from './LogBody.vue'
 
 defineProps<{ jobId?: string }>()
 
@@ -34,7 +36,6 @@ function jumpToBottom(): void {
 
 onMounted(followBottom)
 // 新行到达时若未暂停则跟随到底（watch 由模板外的响应式驱动）
-import { watch } from 'vue'
 watch(
   () => [logStreamState.lines.length, logStreamState.scrollPaused],
   () => { if (!logStreamState.scrollPaused) followBottom() },
@@ -49,8 +50,8 @@ watch(
       <span class="log-job">#{{ jobId || logStreamState.jobId || '—' }}</span>
       <span class="log-count">{{ logStreamState.totalLines }} 行</span>
     </div>
-    <div ref="body" class="log-body" @scroll="onScroll">
-      <span v-for="(l, i) in logStreamState.lines" :key="i" class="log-line" :class="l.cls">{{ l.text }}</span>
+    <div ref="body" class="log-scroll" @scroll="onScroll">
+      <LogBody :lines="logStreamState.lines" />
     </div>
     <button v-if="logStreamState.scrollPaused" class="log-jump" @click="jumpToBottom">↓ 回到底部</button>
   </div>
@@ -90,19 +91,10 @@ watch(
 .ws-dot.ws-closed     { background: var(--state-idle); }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 
-.log-body {
+/* 滚动容器：LogBody 自身高度撑起（原 .log-body 的滚动/排版样式在 LogBody 内） */
+.log-scroll {
   height: var(--logpanel-height);
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 10px 12px;
-  font-family: var(--font-mono);
-  font-size: 12px; line-height: 1.6;
-  color: var(--log-text);
-  white-space: pre-wrap; word-break: break-all;
 }
-.log-line { display: block; padding: 1px 0; border-bottom: 1px solid rgba(255, 255, 255, .04); }
-.log-line.kw  { color: var(--log-keyword); font-weight: 700; }
-.log-line.err { color: var(--log-error); }
-.log-line.sys { color: var(--log-sys); }
 /* 上滑暂停跟随时的"回到底部"悬浮 pill（::after 外扩命中区至 ≥44px） */
 .log-jump {
   position: absolute; right: 10px; bottom: 10px;
