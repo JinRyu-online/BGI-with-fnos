@@ -234,102 +234,115 @@ function useConfigReady(): boolean {
         </div>
       </div>
 
-      <button class="btn btn-primary btn-block" @click="openNew"><GIcon name="check" :size="14" /> 新建定时任务</button>
+      <button class="btn btn-primary btn-block" @click="openNew"><span class="plus">＋</span> 新建定时任务</button>
 
-      <!-- 编辑弹层 -->
-      <div v-if="editing" class="overlay" @click.self="editing = false">
-        <div class="sheet">
-          <div class="sheet-grip"></div>
-          <div class="sheet-title">{{ editingIndex >= 0 ? '编辑定时任务' : '新建定时任务' }}</div>
+      <!-- 编辑弹层：Teleport 到 body（.page 是滚动容器，absolute 弹层随内容滚动、
+           iOS 上 sticky 不可靠——这是取消/保存按钮"消失"的根因）。
+           交互照微信/支付宝底部弹层：标题行右侧 ✕ 关闭，底部操作条 flex 固定在
+           sheet 末尾（sheet 本身 max-height + 内滚，操作条永远可见）。 -->
+      <Teleport to="body">
+        <div v-if="editing" class="overlay" @click.self="editing = false">
+          <div class="sheet">
+            <div class="sheet-grip"></div>
+            <div class="sheet-head">
+              <div class="sheet-title">{{ editingIndex >= 0 ? '编辑定时任务' : '新建定时任务' }}</div>
+              <button class="sheet-close" aria-label="关闭" @click="editing = false">✕</button>
+            </div>
 
-          <div class="field">
-            <label>名称</label>
-            <input v-model="form.name" type="text" placeholder="如：挖矿一条龙" maxlength="20">
-          </div>
-          <div class="field">
-            <label>触发时间</label>
-            <button type="button" class="select-sim" @click="openTimePicker">
-              <span class="ss-value">{{ form.time }}</span>
-              <GIcon name="hourglass" :size="14" />
-            </button>
-          </div>
-          <div class="field">
-            <label>重复（不选 = 每天）</label>
-            <div class="day-picker">
-              <button
-                v-for="(w, i) in WEEKDAY_LABELS" :key="w"
-                type="button" class="day-chip pick" :class="{ on: form.weekdays.includes(i) }"
-                @click="toggleWeekday(i)"
-              >{{ w }}</button>
+            <div class="sheet-body">
+              <div class="field">
+                <label>名称</label>
+                <input v-model="form.name" type="text" placeholder="如：挖矿一条龙" maxlength="20">
+              </div>
+              <div class="field">
+                <label>触发时间</label>
+                <button type="button" class="select-sim" @click="openTimePicker">
+                  <span class="ss-value">{{ form.time }}</span>
+                  <GIcon name="hourglass" :size="14" />
+                </button>
+              </div>
+              <div class="field">
+                <label>重复（不选 = 每天）</label>
+                <div class="day-picker">
+                  <button
+                    v-for="(w, i) in WEEKDAY_LABELS" :key="w"
+                    type="button" class="day-chip pick" :class="{ on: form.weekdays.includes(i) }"
+                    @click="toggleWeekday(i)"
+                  >{{ w }}</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>执行任务</label>
+                <button type="button" class="select-sim" @click="taskPicker = true">
+                  <span class="ss-value" :class="{ dim: !taskNameOf(form.task_id) }">{{ taskNameOf(form.task_id) || '选择任务' }}</span>
+                  <span class="ss-arrow">›</span>
+                </button>
+                <div v-if="nameErr" class="warn">{{ nameErr }}</div>
+              </div>
+              <div class="field row">
+                <label class="check"><input v-model="form.wake" type="checkbox"> 先 WOL 唤醒（PC 常开可关）</label>
+              </div>
+              <div class="field row">
+                <label class="check"><input v-model="form.skip_if_busy" type="checkbox"> Windows 忙时跳过本次</label>
+              </div>
+            </div>
+
+            <div class="sheet-actions">
+              <button class="btn btn-secondary" @click="editing = false">取消</button>
+              <button class="btn btn-primary" :disabled="saving" @click="save">
+                <span v-if="saving" class="spinner"></span>保存
+              </button>
             </div>
           </div>
-          <div class="field">
-            <label>执行任务</label>
-            <button type="button" class="select-sim" @click="taskPicker = true">
-              <span class="ss-value" :class="{ dim: !taskNameOf(form.task_id) }">{{ taskNameOf(form.task_id) || '选择任务' }}</span>
-              <span class="ss-arrow">›</span>
-            </button>
-            <div v-if="nameErr" class="warn">{{ nameErr }}</div>
-          </div>
-          <div class="field row">
-            <label class="check"><input v-model="form.wake" type="checkbox"> 先 WOL 唤醒（PC 常开可关）</label>
-          </div>
-          <div class="field row">
-            <label class="check"><input v-model="form.skip_if_busy" type="checkbox"> Windows 忙时跳过本次</label>
-          </div>
+        </div>
 
-          <!-- sticky 底部操作条：iOS 键盘/小屏下按钮固定可见，绝不随内容滚没 -->
-          <div class="sheet-actions">
-            <button class="btn btn-secondary" @click="editing = false">取消</button>
-            <button class="btn btn-primary" :disabled="saving" @click="save">
-              <span v-if="saving" class="spinner"></span>保存
-            </button>
+        <!-- 时间选择：照成熟 App（iOS 时钟/闹钟编辑）双列滚轮 + 顶部文字按钮。
+             同样 Teleport 到 body，避免滚动容器问题。 -->
+        <div v-if="timePicker" class="overlay" @click.self="timePicker = false">
+          <div class="sheet sheet-compact">
+            <div class="sheet-grip"></div>
+            <div class="sheet-head">
+              <button class="text-btn" @click="timePicker = false">取消</button>
+              <div class="sheet-title-sm">触发时间</div>
+              <button class="text-btn primary" @click="applyTime">确定</button>
+            </div>
+            <div class="tp-row">
+              <select v-model.number="tpHour" class="tp-select">
+                <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ String(h - 1).padStart(2, '0') }} 时</option>
+              </select>
+              <span class="tp-colon">:</span>
+              <select v-model.number="tpMinute" class="tp-select">
+                <option v-for="m in 12" :key="(m - 1) * 5" :value="(m - 1) * 5">{{ String((m - 1) * 5).padStart(2, '0') }} 分</option>
+              </select>
+            </div>
+            <div class="tp-pad"></div>
           </div>
         </div>
-      </div>
 
-      <!-- 时间选择（自绘滚轮式面板，替代原生 time input 的系统样式差异） -->
-      <div v-if="timePicker" class="overlay center" @click.self="timePicker = false">
-        <div class="picker-card">
-          <div class="picker-title">触发时间</div>
-          <div class="tp-row">
-            <select v-model.number="tpHour" class="tp-select">
-              <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ String(h - 1).padStart(2, '0') }} 时</option>
-            </select>
-            <span class="tp-colon">:</span>
-            <select v-model.number="tpMinute" class="tp-select">
-              <option v-for="m in 12" :key="(m - 1) * 5" :value="(m - 1) * 5">{{ String((m - 1) * 5).padStart(2, '0') }} 分</option>
-            </select>
-          </div>
-          <div class="sheet-actions">
-            <button class="btn btn-secondary" @click="timePicker = false">取消</button>
-            <button class="btn btn-primary" @click="applyTime">确定</button>
+        <!-- 任务选择：照 iOS 操作列表——选中即关（无取消按钮，点遮罩/手势即退出） -->
+        <div v-if="taskPicker" class="overlay" @click.self="taskPicker = false">
+          <div class="sheet sheet-compact">
+            <div class="sheet-grip"></div>
+            <div class="sheet-head">
+              <div class="sheet-title-sm">选择执行任务</div>
+              <button class="sheet-close" aria-label="关闭" @click="taskPicker = false">✕</button>
+            </div>
+            <div class="task-list">
+              <button
+                v-for="t in tasks" :key="t.id"
+                type="button" class="task-opt" :class="{ sel: t.id === form.task_id }"
+                @click="pickTask(t)"
+              >
+                <span class="to-name">{{ t.display_name }}</span>
+                <span class="to-sub">{{ t.groups.join(' → ') }}</span>
+                <span v-if="t.id === form.task_id" class="to-check"><GIcon name="check" :size="14" /></span>
+              </button>
+              <div v-if="!tasks.length" class="empty-hint">未获取到任务列表<br>请确认已配对 Windows 设备</div>
+            </div>
+            <div class="tp-pad"></div>
           </div>
         </div>
-      </div>
-
-      <!-- 任务选择（底部列表弹层，替代原生 select 的系统样式差异） -->
-      <div v-if="taskPicker" class="overlay" @click.self="taskPicker = false">
-        <div class="sheet">
-          <div class="sheet-grip"></div>
-          <div class="sheet-title">选择执行任务</div>
-          <div class="task-list">
-            <button
-              v-for="t in tasks" :key="t.id"
-              type="button" class="task-opt" :class="{ sel: t.id === form.task_id }"
-              @click="pickTask(t)"
-            >
-              <span class="to-name">{{ t.display_name }}</span>
-              <span class="to-sub">{{ t.groups.join(' → ') }}</span>
-              <span v-if="t.id === form.task_id" class="to-check"><GIcon name="check" :size="14" /></span>
-            </button>
-            <div v-if="!tasks.length" class="empty-hint">未获取到任务列表<br>请确认已配对 Windows 设备</div>
-          </div>
-          <div class="sheet-actions">
-            <button class="btn btn-secondary" @click="taskPicker = false">取消</button>
-          </div>
-        </div>
-      </div>
+      </Teleport>
     </template>
   </div>
 </template>
@@ -355,6 +368,7 @@ function useConfigReady(): boolean {
 .sc-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .btn-sm { min-height: 36px; font-size: var(--font-sm); padding: 0 14px; }
 button.btn-block { margin-top: var(--space-3); }
+.plus { font-size: 18px; font-weight: 700; line-height: 1; margin-right: 2px; }
 
 /* 启停开关 */
 .sc-switch { position: relative; width: 44px; height: 26px; flex-shrink: 0; }
@@ -371,25 +385,86 @@ button.btn-block { margin-top: var(--space-3); }
 .sc-switch input:checked + .slider { background: var(--brand); }
 .sc-switch input:checked + .slider::after { transform: translateX(18px); }
 
-/* 底部弹层（编辑表单） */
+/* 弹层（Teleport 到 body）：position:fixed 到视口，与页面滚动完全解耦——
+   这是 iOS 上取消/保存按钮"消失"的根治（原 absolute 弹层在 .page 滚动容器内，
+   随内容滚动 + iOS sticky 失效）。 */
 .overlay {
-  position: absolute; inset: 0; z-index: 30;
-  background: rgba(59, 74, 90, .4);
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(59, 74, 90, .45);
   display: flex; align-items: flex-end;
+  justify-content: center;
+  animation: fadeIn .15s ease-out;
 }
-.overlay.center { align-items: center; justify-content: center; padding: var(--space-5); }
-.picker-card {
-  width: 100%; max-width: 320px; background: var(--surface);
-  border-radius: var(--radius-lg); padding: var(--space-4);
-  box-shadow: var(--shadow-float);
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.sheet {
+  width: 100%; max-width: var(--shell-max);
+  background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 6px var(--space-4) 0;
+  max-height: 82dvh;
+  display: flex; flex-direction: column;
   animation: sheetUp .22s ease-out;
 }
 @keyframes sheetUp { from { transform: translateY(40%); opacity: .5; } to { transform: none; opacity: 1; } }
-.picker-title { font-size: var(--font-md); font-weight: 700; text-align: center; margin-bottom: var(--space-3); }
-.tp-row { display: flex; align-items: center; justify-content: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.sheet-compact { max-height: 60dvh; }
+.sheet-grip {
+  width: 40px; height: 4px; border-radius: 2px;
+  background: var(--border-strong); margin: 6px auto var(--space-1);
+  flex-shrink: 0;
+}
+/* 标题行：标题 + 右侧 ✕（编辑/选择弹层）；或左文字按钮 + 标题 + 右文字按钮（时间弹层） */
+.sheet-head {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-2);
+  flex-shrink: 0;
+}
+.sheet-title { flex: 1; font-size: var(--font-lg); font-weight: 700; }
+.sheet-title-sm { flex: 1; text-align: center; font-size: var(--font-md); font-weight: 700; }
+.text-btn {
+  border: none; background: none; padding: 6px 4px;
+  font-size: var(--font-base); color: var(--text-2); min-width: 52px;
+}
+.text-btn.primary { color: var(--brand-strong); font-weight: 600; }
+.sheet-close {
+  flex-shrink: 0;
+  width: 28px; height: 28px; border: none; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-3);
+  font-size: 12px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sheet-close:active { background: var(--danger-weak); color: var(--danger); }
+/* 内容区滚动；操作条在 sheet 末尾（flex 布局，永远可见——非 sticky hack） */
+.sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.sheet-actions {
+  flex-shrink: 0;
+  display: flex; gap: var(--space-3);
+  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
+  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.sheet-actions .btn { flex: 1; }
+.tp-pad { height: calc(var(--space-3) + env(safe-area-inset-bottom)); flex-shrink: 0; }
+.field > label { display: block; font-size: var(--font-sm); color: var(--text-2); margin-bottom: 5px; }
+.field input[type="text"] {
+  width: 100%; min-height: 44px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  padding: 0 12px; font-size: var(--font-base);
+  background: var(--surface); color: var(--text-1); outline: none;
+  font-family: inherit;
+}
+.field input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-weak); }
+.day-picker { display: flex; gap: 6px; }
+.day-chip.pick { cursor: pointer; }
+.field.row .check { display: flex; align-items: center; gap: 8px; font-size: var(--font-base); color: var(--text-1); }
+.field.row .check input { width: 18px; height: 18px; accent-color: var(--brand); }
+.warn { margin-top: 5px; font-size: var(--font-xs); color: var(--warning); }
+
+/* 时间选择双列（时/分） */
+.tp-row { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-2) 0; }
 .tp-colon { font-size: var(--font-xl); font-weight: 700; color: var(--text-2); }
 .tp-select {
-  min-height: 52px; padding: 0 14px;
+  min-height: 52px; padding: 0 18px;
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);
   background: var(--surface-2); color: var(--text-1);
   font-size: var(--font-lg); font-weight: 600; font-family: var(--font-mono);
@@ -397,48 +472,6 @@ button.btn-block { margin-top: var(--space-3); }
   text-align: center; text-align-last: center;
 }
 .tp-select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-weak); }
-.sheet {
-  width: 100%; background: var(--surface);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  padding: 6px var(--space-4) 0;
-  max-height: 82dvh;
-  display: flex; flex-direction: column;
-  animation: sheetUp .22s ease-out;
-}
-.sheet-grip {
-  width: 40px; height: 4px; border-radius: 2px;
-  background: var(--border-strong); margin: 6px auto var(--space-2);
-  flex-shrink: 0;
-}
-.sheet-title { font-size: var(--font-lg); font-weight: 700; margin-bottom: var(--space-3); flex-shrink: 0; }
-.sheet-actions {
-  /* sticky 底部操作条：iOS 小屏/键盘弹起时按钮固定可见，绝不随内容滚出屏幕 */
-  position: sticky; bottom: 0;
-  display: flex; gap: var(--space-3);
-  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
-  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.sheet-actions .btn { flex: 1; }
-.sheet > .field, .sheet > .task-list, .sheet > .warn { flex-shrink: 0; }
-.sheet { overflow-y: auto; }
-.task-list { overflow-y: visible; }
-.field > label { display: block; font-size: var(--font-sm); color: var(--text-2); margin-bottom: 5px; }
-.field input[type="text"], .field input[type="time"], .field select {
-  width: 100%; min-height: 44px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  padding: 0 12px; font-size: var(--font-base);
-  background: var(--surface); color: var(--text-1); outline: none;
-  font-family: inherit;
-}
-.field input:focus, .field select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-weak); }
-.day-picker { display: flex; gap: 6px; }
-.day-chip.pick { cursor: pointer; }
-.field.row .check { display: flex; align-items: center; gap: 8px; font-size: var(--font-base); color: var(--text-1); }
-.field.row .check input { width: 18px; height: 18px; accent-color: var(--brand); }
-.warn { margin-top: 5px; font-size: var(--font-xs); color: var(--warning); }
 
 /* 自绘选择器（触发时间/执行任务）：模拟 iOS 风格列表行，点开子弹层，规避原生
    select/time input 在 Windows/Android/iOS 上样式不一致的问题 */

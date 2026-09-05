@@ -8,7 +8,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TaskCard from '../components/TaskCard.vue'
 import Skeleton from '../components/Skeleton.vue'
-import GIcon from '../components/GIcon.vue'
 import { api } from '../composables/useApi'
 import { toast } from '../composables/useToast'
 import { showConfirm } from '../composables/useConfirm'
@@ -107,10 +106,36 @@ async function remove(t: BgiTask): Promise<void> {
 }
 
 onMounted(load)
+
+/* ---- 卡片右上角竖三点菜单（照微信/抖音卡片交互）---- */
+const menuFor = ref('') // 打开菜单的任务 id（'' = 全部关闭）
+const menuPos = ref({ top: 0, right: 0 }) // 菜单弹出位置（贴按钮下方，右对齐）
+
+function toggleMenu(id: string, ev?: Event): void {
+  if (menuFor.value === id) { closeMenu(); return }
+  // 以按钮锚定菜单位置（fixed 坐标，随滚动会偏——弹层短暂存在可接受；
+  // 点遮罩即关，滚动场景用户不会停留）
+  const btn = (ev?.currentTarget as HTMLElement | undefined) ?? (ev?.target as HTMLElement)
+  const r = btn.getBoundingClientRect()
+  menuPos.value = { top: r.bottom + 6, right: window.innerWidth - r.right }
+  menuFor.value = id
+}
+function closeMenu(): void {
+  menuFor.value = ''
+}
+function menuEdit(t: BgiTask): void {
+  closeMenu()
+  openEdit(t)
+}
+function menuRemove(t: BgiTask): void {
+  closeMenu()
+  void remove(t)
+}
+
 </script>
 
 <template>
-  <div>
+  <div @click.capture="menuFor && closeMenu()">
     <template v-if="loading">
       <Skeleton height="120px" />
       <Skeleton height="120px" />
@@ -118,62 +143,78 @@ onMounted(load)
     </template>
     <template v-else>
       <div class="tools-row">
-        <span class="tools-hint">{{ tasks.length ? '长按任务卡可编辑' : '' }}</span>
-        <button class="btn btn-secondary btn-tool" @click="openNew"><GIcon name="check" :size="13" /> 新建任务</button>
+        <span class="tools-hint">共 {{ tasks.length }} 个任务 · 点卡片右上 ⋮ 可编辑</span>
+        <button class="btn btn-secondary btn-tool" @click="openNew"><span class="plus">＋</span> 新建任务</button>
       </div>
       <div v-if="error" class="card"><div class="empty-hint">{{ error }}<br>请确认已配对设备后重试</div></div>
       <div v-else-if="!tasks.length" class="card">
-        <div class="empty-hint">暂无任务<br>请先在「设置」页扫描并配对 Windows 主机，或点右上"新建任务"</div>
+        <div class="empty-hint">暂无任务<br>请先在「设置」页扫描并配对 Windows 主机，或点上方"新建任务"</div>
       </div>
       <template v-else>
         <div v-for="t in tasks" :key="t.id" class="task-wrap">
           <TaskCard :task="t" @triggered="onTriggered" />
-          <div class="task-tools">
-            <button class="tool-btn" @click="openEdit(t)">编辑</button>
-            <span class="tool-sep">·</span>
-            <button class="tool-btn danger" @click="remove(t)">删除</button>
+          <div class="kebab-wrap" @click.stop>
+            <button class="kebab-btn" aria-label="任务操作" @click="toggleMenu(t.id, $event)">
+              <span></span><span></span><span></span>
+            </button>
+            <Teleport to="body">
+              <template v-if="menuFor === t.id">
+                <div class="menu-mask" @click="closeMenu"></div>
+                <div class="menu-pop" :style="{ top: menuPos.top + 'px', right: menuPos.right + 'px' }">
+                  <button class="menu-item" @click="menuEdit(t)">编辑任务</button>
+                  <button class="menu-item danger" @click="menuRemove(t)">删除任务</button>
+                </div>
+              </template>
+            </Teleport>
           </div>
         </div>
       </template>
 
-      <!-- 任务编辑弹层 -->
-      <div v-if="editing" class="overlay" @click.self="editing = false">
-        <div class="sheet">
-          <div class="sheet-grip"></div>
-          <div class="sheet-title">{{ isNew ? '新建任务' : '编辑任务' }}</div>
-          <div class="field">
-            <label>任务名称</label>
-            <input v-model="form.display_name" type="text" placeholder="如：挖矿一条龙" maxlength="30">
-          </div>
-          <div class="field">
-            <label>BetterGI 调度组（顿号/逗号分隔，按顺序执行；须与「全自动-调度器」组名逐字一致）</label>
-            <textarea
-              v-model="groupsText" rows="3"
-              placeholder="如：日常一条龙、采矿、领取奖励、关闭游戏"
-            ></textarea>
-          </div>
-          <div class="field">
-            <label>超时上限（分钟，1-1440）</label>
-            <input v-model.number="form.timeout_min" type="number" min="1" max="1440">
-          </div>
-          <div class="field">
-            <label>完成后动作</label>
-            <div class="after-picker">
-              <button
-                v-for="opt in TASK_AFTER_DONE_OPTIONS" :key="opt"
-                type="button" class="after-chip" :class="{ on: form.after_done === opt }"
-                @click="form.after_done = opt"
-              >{{ AFTER_DONE_LABEL[opt] || opt }}</button>
+      <!-- 任务编辑弹层：Teleport 到 body + fixed（与定时页同款，iOS 按钮不消失） -->
+      <Teleport to="body">
+        <div v-if="editing" class="overlay" @click.self="editing = false">
+          <div class="sheet">
+            <div class="sheet-grip"></div>
+            <div class="sheet-head">
+              <div class="sheet-title">{{ isNew ? '新建任务' : '编辑任务' }}</div>
+              <button class="sheet-close" aria-label="关闭" @click="editing = false">✕</button>
+            </div>
+            <div class="sheet-body">
+              <div class="field">
+                <label>任务名称</label>
+                <input v-model="form.display_name" type="text" placeholder="如：挖矿一条龙" maxlength="30">
+              </div>
+              <div class="field">
+                <label>BetterGI 调度组（顿号/逗号分隔，按顺序执行；须与「全自动-调度器」组名逐字一致）</label>
+                <textarea
+                  v-model="groupsText" rows="3"
+                  placeholder="如：日常一条龙、采矿、领取奖励、关闭游戏"
+                ></textarea>
+              </div>
+              <div class="field">
+                <label>超时上限（分钟，1-1440）</label>
+                <input v-model.number="form.timeout_min" type="number" min="1" max="1440">
+              </div>
+              <div class="field">
+                <label>完成后动作</label>
+                <div class="after-picker">
+                  <button
+                    v-for="opt in TASK_AFTER_DONE_OPTIONS" :key="opt"
+                    type="button" class="after-chip" :class="{ on: form.after_done === opt }"
+                    @click="form.after_done = opt"
+                  >{{ AFTER_DONE_LABEL[opt] || opt }}</button>
+                </div>
+              </div>
+            </div>
+            <div class="sheet-actions">
+              <button class="btn btn-secondary" @click="editing = false">取消</button>
+              <button class="btn btn-primary" :disabled="saving" @click="save">
+                <span v-if="saving" class="spinner"></span>保存
+              </button>
             </div>
           </div>
-          <div class="sheet-actions">
-            <button class="btn btn-secondary" @click="editing = false">取消</button>
-            <button class="btn btn-primary" :disabled="saving" @click="save">
-              <span v-if="saving" class="spinner"></span>保存
-            </button>
-          </div>
         </div>
-      </div>
+      </Teleport>
     </template>
   </div>
 </template>
@@ -182,41 +223,88 @@ onMounted(load)
 .tools-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-bottom: var(--space-2); }
 .tools-hint { flex: 1; font-size: var(--font-xs); color: var(--text-3); }
 .btn-tool { min-height: 36px; font-size: var(--font-sm); padding: 0 14px; }
+.plus { font-size: 16px; font-weight: 700; line-height: 1; margin-right: 2px; }
 .task-wrap { position: relative; }
-.task-tools {
-  position: absolute; top: 10px; right: 12px;
-  display: flex; align-items: center; gap: 6px;
-  z-index: 2;
-}
-.tool-btn {
-  border: none; background: var(--surface-2); color: var(--text-2);
-  font-size: var(--font-xs); padding: 3px 10px; border-radius: var(--radius-full);
-}
-.tool-btn.danger { color: var(--danger); }
-.tool-sep { color: var(--text-3); font-size: var(--font-xs); }
 
-/* 底部弹层（同 SchedulesPage 风格） */
-.overlay {
-  position: absolute; inset: 0; z-index: 30;
-  background: rgba(59, 74, 90, .4);
-  display: flex; align-items: flex-end;
+/* 竖三点菜单按钮（卡片右上角） */
+.kebab-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
+.kebab-btn {
+  width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: var(--surface-2);
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; transition: background .15s, transform .06s;
 }
+.kebab-btn:active { transform: scale(.92); background: var(--brand-weak); }
+.kebab-btn span {
+  width: 3.5px; height: 3.5px; border-radius: 50%;
+  background: var(--text-2); display: block;
+}
+/* 弹出菜单：Teleport 到 body，fixed 定位贴按钮下方右对齐 */
+.menu-mask { position: fixed; inset: 0; z-index: 90; }
+.menu-pop {
+  position: fixed; z-index: 91;
+  min-width: 140px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  animation: menuIn .12s ease-out;
+}
+@keyframes menuIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: none; } }
+.menu-item {
+  width: 100%; min-height: 44px;
+  border: none; background: var(--surface); text-align: left;
+  padding: 0 16px; font-size: var(--font-base); color: var(--text-1);
+}
+.menu-item + .menu-item { border-top: 1px solid var(--border); }
+.menu-item:active { background: var(--surface-2); }
+.menu-item.danger { color: var(--danger); }
+
+/* 底部弹层（Teleport + fixed，与 SchedulesPage 同款） */
+.overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(59, 74, 90, .45);
+  display: flex; align-items: flex-end;
+  justify-content: center;
+  animation: fadeIn .15s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .sheet {
-  width: 100%; background: var(--surface);
+  width: 100%; max-width: var(--shell-max);
+  background: var(--surface);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   padding: 6px var(--space-4) 0;
   max-height: 82dvh;
   display: flex; flex-direction: column;
-  overflow-y: auto;
   animation: sheetUp .22s ease-out;
 }
 @keyframes sheetUp { from { transform: translateY(40%); opacity: .5; } to { transform: none; opacity: 1; } }
 .sheet-grip {
   width: 40px; height: 4px; border-radius: 2px;
-  background: var(--border-strong); margin: 6px auto var(--space-2);
+  background: var(--border-strong); margin: 6px auto var(--space-1);
   flex-shrink: 0;
 }
-.sheet-title { font-size: var(--font-lg); font-weight: 700; margin-bottom: var(--space-3); flex-shrink: 0; }
+.sheet-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0 var(--space-2); flex-shrink: 0; }
+.sheet-title { flex: 1; font-size: var(--font-lg); font-weight: 700; }
+.sheet-close {
+  flex-shrink: 0;
+  width: 28px; height: 28px; border: none; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-3);
+  font-size: 12px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sheet-close:active { background: var(--danger-weak); color: var(--danger); }
+.sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.sheet-actions {
+  flex-shrink: 0;
+  display: flex; gap: var(--space-3);
+  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
+  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.sheet-actions .btn { flex: 1; }
 .field { margin-bottom: var(--space-3); flex-shrink: 0; }
 .field > label { display: block; font-size: var(--font-sm); color: var(--text-2); margin-bottom: 5px; line-height: 1.5; }
 .field input, .field textarea {
@@ -235,14 +323,4 @@ onMounted(load)
   background: var(--surface-2); color: var(--text-2); font-size: var(--font-sm);
 }
 .after-chip.on { background: var(--brand-weak); border-color: var(--brand); color: var(--brand-strong); font-weight: 600; }
-.sheet-actions {
-  position: sticky; bottom: 0;
-  display: flex; gap: var(--space-3);
-  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
-  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.sheet-actions .btn { flex: 1; }
 </style>
