@@ -4,7 +4,9 @@
  * - sticky 摘要卡：StateBadge + 任务名 + 定时徽章 + 起止时间/用时
  * - 工具条：过滤输入（250ms 防抖、大小写不敏感）+ 复制（clipboard 优先，HTTP 内网
  *   iOS 走 execCommand 降级；toast 如实反映降级成败）+ 命中数角标
- * - 日志区：LogBody 共用组件；无自动滚动（静态数据）；首屏 1000 行 + "加载更多"
+ * - 日志区：LogCard（统一外壳）+ LogBody 共用组件；followKey = contentVersion
+ *   （仅 fetch/loadMore 成功 bump，过滤不触发跟随）；showBadge=false；首屏 1000 行 +
+ *   "加载更多"（视口保持的 scrollHeight 差值补偿在 LogBody 内做）
  * - 空态（404 无录制）：引导配置 Windows 端 bettergi 日志路径
  */
 import { computed, onBeforeUnmount, onMounted } from 'vue'
@@ -12,7 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import StateBadge from '../components/StateBadge.vue'
 import Skeleton from '../components/Skeleton.vue'
 import GIcon from '../components/GIcon.vue'
-import LogBody from '../components/LogBody.vue'
+import LogCard from '../components/LogCard.vue'
 import {
   fetchLogHistory, loadMore, onKeywordInput, resetLogHistory,
   visibleLines, hitCount, visibleText, logHistoryState,
@@ -151,14 +153,19 @@ onBeforeUnmount(() => {
         <div v-if="hitCount.active" class="hit-badge">
           命中 {{ hitCount.hits }} / {{ hitCount.total }} 行
         </div>
-        <div class="log-frame">
-          <LogBody
-            :lines="visibleLines"
-            :height="'60vh'"
-            :on-load-more="logHistoryState.atMaxTail ? undefined : loadMore"
-            :loading-more="logHistoryState.loadingMore"
-          />
-        </div>
+        <LogCard
+          title="任务日志"
+          :lines="visibleLines"
+          :follow-key="logHistoryState.contentVersion"
+          :show-badge="false"
+          :on-load-more="logHistoryState.atMaxTail ? undefined : loadMore"
+          :loading-more="logHistoryState.loadingMore"
+          body-height="60vh"
+        >
+          <template v-if="hitCount.active">
+            <span class="head-hit">命中 {{ hitCount.hits }}/{{ hitCount.total }}</span>
+          </template>
+        </LogCard>
       </template>
     </template>
   </div>
@@ -240,11 +247,12 @@ onBeforeUnmount(() => {
   margin: 0 2px var(--space-2);
 }
 
-/* 深色日志框：LogBody 套一层圆角边框 */
-.log-frame {
-  background: var(--log-bg);
-  border: 1px solid var(--log-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+/* 深色日志区改由 LogCard 统一外壳（log-frame 已删）；头部命中数角标 */
+.head-hit {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  padding: 1px 8px; border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, .06); color: var(--log-head-text);
+  flex-shrink: 0;
 }
 </style>

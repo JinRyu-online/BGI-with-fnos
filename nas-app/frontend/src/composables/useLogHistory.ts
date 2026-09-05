@@ -2,7 +2,8 @@
  * 历史日志回看（详情页 /logs/:jobId 数据源）
  * - fetch(jobId, tail)：GET /api/logs/{job_id}?tail=N → 分类为 LogLine[]
  * - 状态 {loading, error, lines, keyword, visible}；keyword 过滤 250ms 防抖、
- *   大小写不敏感 includes；hitCount 角标
+ *   大小写不敏感 includes；hitCount 角标；contentVersion 内容版本号（fetch/loadMore
+ *   成功 +1、过滤不动）作 LogBody followKey——过滤切换不触发跟随
  * - "加载更多"：递增 tail 上限（1000 → 2000 → 3000 → 5000 封顶）重新拉取，
  *   后端钳制上限 5000（无"全部"模式，移动端渲染保护）
  * ============================================================ */
@@ -30,6 +31,8 @@ interface LogHistoryState {
   tailStep: number
   /** 是否已到最大 tail（隐藏"加载更多"） */
   atMaxTail: boolean
+  /** 内容版本号：仅 fetch/loadMore 成功后 +1（过滤不 bump）——LogBody followKey 语义源 */
+  contentVersion: number
 }
 
 export const logHistoryState = reactive<LogHistoryState>({
@@ -42,6 +45,7 @@ export const logHistoryState = reactive<LogHistoryState>({
   activeKeyword: '',
   tailStep: 0,
   atMaxTail: false,
+  contentVersion: 0,
 })
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -75,6 +79,7 @@ async function fetchInner(jobId: string, tail: number): Promise<void> {
   logHistoryState.jobId = jobId
   logHistoryState.tailStep = TAIL_STEPS.indexOf(tail) >= 0 ? TAIL_STEPS.indexOf(tail) : 0
   logHistoryState.atMaxTail = tail >= TAIL_STEPS[TAIL_STEPS.length - 1]
+  logHistoryState.contentVersion++
 }
 
 /** 进入详情页拉取：骨架屏态 + 错误兜底（404 → 空态引导文案在页面层渲染）。 */
@@ -134,6 +139,7 @@ export function resetLogHistory(): void {
   logHistoryState.activeKeyword = ''
   logHistoryState.tailStep = 0
   logHistoryState.atMaxTail = false
+  logHistoryState.contentVersion = 0
 }
 
 export function useLogHistory() {
