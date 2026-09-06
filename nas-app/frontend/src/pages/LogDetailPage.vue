@@ -1,13 +1,18 @@
 <script setup lang="ts">
 /**
  * 历史任务日志详情页 /logs/:jobId（独立全屏路由，非弹层：内容长、刷新不丢、可返回）。
- * - sticky 摘要卡：StateBadge + 任务名 + 定时徽章 + 起止时间/用时
+ * - 布局：in-flow height:100% flex 列（.page padding 保留含 tabbar 避让），页面不滚，
+ *   日志滚动区是唯一滚动域（scrollChaining=contain 止链，无双滚动/双滚动条）
+ * - 头部：返回 + 摘要卡（StateBadge + 任务名 + 定时徽章 + 起止时间/用时），天然固定
  * - 工具条：过滤输入（250ms 防抖、大小写不敏感）+ 复制（clipboard 优先，HTTP 内网
- *   iOS 走 execCommand 降级；toast 如实反映降级成败）+ 命中数角标
- * - 日志区：LogCard（统一外壳）+ LogBody 共用组件；followKey = contentVersion
- *   （仅 fetch/loadMore 成功 bump，过滤不触发跟随）；showBadge=false；首屏 1000 行 +
- *   "加载更多"（视口保持的 scrollHeight 差值补偿在 LogBody 内做）
- * - 空态（404 无录制）：引导配置 Windows 端 bettergi 日志路径
+ *   iOS 走 execCommand 降级；toast 如实反映降级成败）+ 命中数角标（行内，显隐
+ *   不改变纵向高度）
+ * - 日志区：.log-section 定高链（flex:1 min-height:0 逐层）→ LogCard（统一外壳）+
+ *   LogBody 共用组件；followKey = contentVersion（仅 fetch/loadMore 成功 bump，
+ *   过滤不触发跟随）；showBadge=false；首屏 1000 行 + "加载更多"（视口保持的
+ *   scrollHeight 差值补偿在 LogBody 内做）
+ * - 空态（404 无录制）：引导配置 Windows 端 bettergi 日志路径；错误态/空态超长
+ *   文案由页面 overflow-y:auto 兜底可滚
  */
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -91,13 +96,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="detail-page">
-    <!-- 单条 sticky 头部容器：返回行 + 摘要卡整体钉住，避免双层 sticky 露缝 -->
+    <!-- 头部容器：返回行 + 摘要卡整体固定（页面不滚，无需 sticky） -->
     <div class="detail-header">
       <button class="back-btn" @click="goBack">
         <span class="back-chevron">‹</span> 返回
       </button>
 
-      <!-- 摘要卡（浅色历史卡风格，随容器整体 sticky，自身不再 sticky） -->
+      <!-- 摘要卡（浅色历史卡风格，随头部容器整体固定，自身不 sticky） -->
       <div class="card summary-card">
         <div class="sum-row">
           <StateBadge v-if="record" :state="record.state ?? ''" />
@@ -119,10 +124,10 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <!-- 加载错误 -->
-      <div v-if="logHistoryState.error" class="card"><div class="empty-hint">{{ logHistoryState.error }}</div></div>
+      <div v-if="logHistoryState.error" class="card detail-static-card"><div class="empty-hint">{{ logHistoryState.error }}</div></div>
 
       <!-- 无录制空态：引导配置 bettergi 日志路径 -->
-      <div v-else-if="noLog" class="card">
+      <div v-else-if="noLog" class="card detail-static-card">
         <div class="empty-hint">
           <p class="nl-title">暂无日志记录</p>
           <p class="nl-sub">该任务没有在 NAS 上留下日志（可能录制未启用或录制失败）。</p>
@@ -151,36 +156,50 @@ onBeforeUnmount(() => {
           <button class="copy-btn" @click="copyVisible">
             <GIcon name="check" :size="13" /> 复制
           </button>
+          <!-- hit-badge 放工具条行内：出现/消失不改变纵向布局高度
+              （独立行会突变日志区 clientHeight，扰动 atBottom 判定/回底钮） -->
+          <span v-if="hitCount.active" class="hit-badge">
+            命中 {{ hitCount.hits }}/{{ hitCount.total }}
+          </span>
         </div>
-        <div v-if="hitCount.active" class="hit-badge">
-          命中 {{ hitCount.hits }} / {{ hitCount.total }} 行
+        <!-- 唯一滚动域容器：吃满页面剩余高度，LogCard→LogBody 定高链在其内闭合 -->
+        <div class="log-section">
+          <LogCard
+            title="任务日志"
+            :lines="visibleLines"
+            :follow-key="logHistoryState.contentVersion"
+            :show-badge="false"
+            :on-load-more="logHistoryState.atMaxTail ? undefined : loadMore"
+            :loading-more="logHistoryState.loadingMore"
+            body-height="100%"
+            scroll-chaining="contain"
+            class="detail-log-card"
+          >
+            <template v-if="hitCount.active">
+              <span class="head-hit">命中 {{ hitCount.hits }}/{{ hitCount.total }}</span>
+            </template>
+          </LogCard>
         </div>
-        <LogCard
-          title="任务日志"
-          :lines="visibleLines"
-          :follow-key="logHistoryState.contentVersion"
-          :show-badge="false"
-          :on-load-more="logHistoryState.atMaxTail ? undefined : loadMore"
-          :loading-more="logHistoryState.loadingMore"
-          body-height="420px"
-        >
-          <template v-if="hitCount.active">
-            <span class="head-hit">命中 {{ hitCount.hits }}/{{ hitCount.total }}</span>
-          </template>
-        </LogCard>
       </template>
     </template>
   </div>
 </template>
 
 <style scoped>
-.detail-page { display: flex; flex-direction: column; }
+/* 页面根：in-flow height:100%（父级 .page 为 abspos 定高、padding 原样保留含
+   tabbar/safe-area 避让）。flex 列 + 日志区吃满剩余高度 → 整页自身不产生滚动，
+   overflow-y:auto 仅兜底错误态/空态超长文案（小屏 + 三段引导）可滚不被裁。 */
+.detail-page {
+  height: 100%;
+  display: flex; flex-direction: column;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
 
-/* 单条 sticky 头部容器：返回行 + 摘要卡整体钉住（双层 sticky 会露缝）。
+/* 头部容器（返回行 + 摘要卡）：页面不滚后无 sticky 语义，天然固定。
    水平负 margin 保留 —— 抵消 .page 左右内边距实现全宽贯通，否则内容从两侧缝穿出；
-   上下负值去掉，容器底用 border 分层。背景必须不透明，深色日志区滚动时不透出。 */
+   上下负值去掉，容器底用 border 分层。背景必须不透明。 */
 .detail-header {
-  position: sticky; top: 0; z-index: 5;
+  flex-shrink: 0;
   margin: 0 -4px var(--space-3);
   padding: 4px;
   background: var(--bg);
@@ -197,7 +216,7 @@ onBeforeUnmount(() => {
 .back-btn::after { content: ''; position: absolute; inset: -2px -6px; }
 .back-chevron { font-size: 26px; line-height: 1; margin-top: -3px; }
 
-/* 摘要卡：随 .detail-header 整体 sticky，自身不再 sticky（top:44px 估算值已废弃） */
+/* 摘要卡：随 .detail-header 整体固定，自身不 sticky（top:44px 估算值已废弃） */
 .summary-card { margin: 0 4px var(--space-2); }
 .sum-row { display: flex; align-items: center; gap: var(--space-2); }
 .sum-name { flex: 1; min-width: 0; font-size: var(--font-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -210,8 +229,12 @@ onBeforeUnmount(() => {
 .sum-times { font-size: var(--font-xs); color: var(--text-3); margin-top: 6px; }
 .sum-jobid { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-3); margin-top: 2px; }
 
-/* 工具条：过滤 + 复制 */
-.toolbar { display: flex; gap: var(--space-2); margin-bottom: var(--space-2); }
+/* 工具条：过滤 + 复制 + 命中数角标（同行，显隐不改变纵向高度） */
+.toolbar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
 .filter-wrap {
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 6px;
@@ -245,11 +268,28 @@ onBeforeUnmount(() => {
 }
 .copy-btn::after { content: ''; position: absolute; inset: -4px; }
 
-/* 命中数角标 */
+/* 命中数角标（toolbar 行内）：不换行，与复制钮同排；过窄时收缩省略 */
 .hit-badge {
+  flex-shrink: 0; min-width: 0;
   font-family: var(--font-mono); font-size: var(--font-xs);
   color: var(--text-3);
-  margin: 0 2px var(--space-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 定高链：.log-section 吃满页面剩余高度 → LogCard（flex:1）→ LogBody（flex:1）
+   → .log-scroll height:100% 内联。链路逐层 min-height:0 打破百分比高度对
+   auto 父级失效的断点；页面唯一滚动域是 .log-scroll，页面本身不滚（无双滚动）。 */
+.log-section {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+/* LogCard 根：flex:1 吃满 .log-section；margin-bottom:0 覆盖组件默认 12px
+   （定高链内边距会吃掉日志可视高度，底部间距由 .page padding 承担）。
+   .detail-log-card 挂在 LogCard 根上，Vue 子根带父 scope id → 父作用域直接命中，
+   无需 :deep。 */
+.detail-log-card {
+  flex: 1; min-height: 0;
+  margin-bottom: 0;
 }
 
 /* 深色日志区改由 LogCard 统一外壳（log-frame 已删）；头部命中数角标 */
@@ -261,12 +301,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* 短屏断点（iPhone SE 667px）：420px 日志区过高，压到 280px。
-   LogBody 的 height 是内联 style，需 :deep + !important 覆盖。
-   原则：固定 px，不用 vh 等动态单位（iOS 地址栏/键盘会动态重算导致拉长）。 */
-@media (max-height: 700px) {
-  .detail-page :deep(.log-scroll) {
-    height: 280px !important;
-  }
-}
+/* 骨架屏与错误/空态卡：非日志态无定高链，卡片保持自然高度、不参与 flex 挤压
+   （内容超高时由 .detail-page overflow-y:auto 兜底滚动） */
+.detail-static-card { flex-shrink: 0; }
+.detail-page > .sk-block { flex-shrink: 0; }
 </style>

@@ -4,9 +4,10 @@
  * - 外壳 token 化：--radius-lg 圆角 / --border 边框 / --shadow-card 阴影
  * - 头部条：--log-head-bg 深色底 + rgba(201,168,106,.08) 应用金高光渐变（同族感）；
  *   文字用 --log-head-text（对 --log-head-bg ≈5.4:1，达标 4.5:1）
- * - props：title（头部标题）+ bodyHeight + LogBody 的 props 显式透传对象
- *   （lines/followKey/showBadge/onLoadMore/loadingMore，bodyHeight 映射 LogBody
- *   的 height）；默认插槽放头部元信息（WS 状态点 / 行数 / 命中数）
+ * - props：title（头部标题）+ bodyHeight + scrollChaining + LogBody 的 props
+ *   显式透传对象（lines/followKey/showBadge/onLoadMore/loadingMore，
+ *   bodyHeight 映射 LogBody 的 height）；默认插槽放头部元信息
+ *   （WS 状态点 / 行数 / 命中数）
  * - LogBody 由本组件内部渲染，调用方不直接接触
  */
 import { computed } from 'vue'
@@ -29,6 +30,8 @@ const props = withDefaults(
     loadingMore?: boolean
     /** LogBody 滚动区高度（缺省 --logpanel-height；详情页可传更大值） */
     bodyHeight?: string
+    /** 透传 LogBody.scrollChaining（滚动链：详情页 'contain'，状态页缺省 'allow'） */
+    scrollChaining?: 'allow' | 'contain'
   }>(),
   {
     title: '',
@@ -36,6 +39,7 @@ const props = withDefaults(
     showBadge: false,
     loadingMore: false,
     bodyHeight: '',
+    scrollChaining: 'allow',
   },
 )
 
@@ -47,6 +51,7 @@ const bodyProps = computed(() => ({
   onLoadMore: props.onLoadMore,
   loadingMore: props.loadingMore,
   height: props.bodyHeight,
+  scrollChaining: props.scrollChaining,
 }))
 </script>
 
@@ -62,7 +67,12 @@ const bodyProps = computed(() => ({
 </template>
 
 <style scoped>
+/* flex 列根：供详情页定高链（.log-card flex:1 → LogBody flex:1）生效；
+   状态页 block 容器内 flex 规则不生效，布局零变化。
+   margin-bottom 保留 —— 状态页 LogPanel→操作区间距依赖它；详情页定高链下
+   由父级 flex:1 + min-height:0 承担高度，边距经页面侧对齐（见 LogDetailPage）。 */
 .log-card {
+  display: flex; flex-direction: column;
   background: var(--log-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

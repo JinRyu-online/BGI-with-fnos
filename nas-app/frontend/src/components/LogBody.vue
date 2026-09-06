@@ -13,6 +13,8 @@
  *   prefers-reduced-motion 双重降级（不支持 scrollBehavior 或偏好减少动态 → 直接赋值）
  * - "加载更早"视口保持：记录 prevScrollHeight，DOM 更新后按 scrollHeight 差值补偿
  *   scrollTop（不依赖原生 overflow-anchor——Safari/iOS 不支持）；原本在底部则回底
+ * - scrollChaining prop：详情页传 'contain'（页面不滚、日志区唯一滚动域，止链），
+ *   状态页缺省 'allow' 保持链动体验
  */
 import { nextTick, onMounted, ref, watch } from 'vue'
 import type { LogLine } from '../composables/useLogStream'
@@ -31,8 +33,12 @@ const props = withDefaults(
     loadingMore?: boolean
     /** 是否显示离底新增行数角标（实时页开；静态详情页关，避免 loadMore 时角标泄漏） */
     showBadge?: boolean
+    /** 滚动链行为：allow=现状（滚到边界带动外层）；contain=止于本容器（详情页
+     *  整页不滚、日志区是唯一滚动域时传，防边界链动）。不进全局——状态页 240px
+     *  小窗边界带动页面滚动是预期体验（迭代计划 §3 裁决） */
+    scrollChaining?: 'allow' | 'contain'
   }>(),
-  { followKey: 0, height: '', loadingMore: false, showBadge: false },
+  { followKey: 0, height: '', loadingMore: false, showBadge: false, scrollChaining: 'allow' },
 )
 
 /** 在底判定阈值（px） */
@@ -122,7 +128,10 @@ async function handleLoadMore(): Promise<void> {
     <div
       ref="scrollEl"
       class="log-scroll"
-      :style="height ? { height } : undefined"
+      :style="[
+        height ? { height } : undefined,
+        { overscrollBehavior: scrollChaining },
+      ]"
       @scroll.passive="onScroll"
     >
       <span v-for="(l, i) in lines" :key="i" class="log-line" :class="l.cls">{{ l.text }}</span>
@@ -145,12 +154,17 @@ async function handleLoadMore(): Promise<void> {
 </template>
 
 <style scoped>
-/* 三明治根：relative 定位上下文（浮钮锚点），自身不滚动 */
+/* 三明治根：relative 定位上下文（浮钮锚点），自身不滚动。
+   flex:1 + min-height:0 仅在 flex 父级（详情页 .log-card 列）生效——吃满剩余高度；
+   状态页 block 容器里两条规则无效，.log-scroll 仍走 --logpanel-height 定高。 */
 .log-body-root {
   position: relative;
+  flex: 1;
+  min-height: 0;
   background: var(--log-bg);
 }
-/* 真实滚动区：高度单源 --logpanel-height（height prop 内联覆盖） */
+/* 真实滚动区：高度单源 --logpanel-height（height prop 内联覆盖）；
+   overscroll-behavior 经 scrollChaining prop 动态注入（默认 allow=现状） */
 .log-scroll {
   height: var(--logpanel-height);
   overflow-y: auto; -webkit-overflow-scrolling: touch;
