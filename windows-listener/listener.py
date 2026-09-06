@@ -159,6 +159,10 @@ def main() -> int:
         line_sink=lambda ln: logging.getLogger("bgi_trigger.bettergi").info("%s", ln),
         # ★ /abort 时是否同时终止游戏进程
         abort_kills_game=config.execution.abort_kills_game,
+        # ★ 拉起前脚本（[execution] pre_launch_script，空=禁用）：
+        #   仅真正 Popen 分支前执行（handoff 不执行），失败 WARNING 不阻断；
+        #   默认 runner 走 cmd.exe(shell=True) + timeout 60 + CREATE_NO_WINDOW
+        pre_launch_script=getattr(config.execution, "pre_launch_script", ""),
     )
 
     deps = AppDeps(

@@ -54,6 +54,15 @@ listener.py     入口：装配依赖 + 密钥弹窗 + uvicorn
 
 > **为什么有两个？** `install.ps1` 用 `pythonw.exe` 在后台静默运行（无窗口）。`enable_autostart.ps1` 用 `start_listener.ps1` 带一个可见控制台窗口，方便排查启动问题（端口占用、日志）。`-Console` 任务默认 `/RL LIMITED` 不弹 UAC；如发现 BetterGI 无法启动/聚焦游戏，把 `enable_autostart.ps1` 里的 `$RL` 改成 `"HIGHEST"` 并重跑。
 
+### 无人值守前置配置（WOL 唤醒 → 自动执行 → 休眠 闭环必读）
+
+定时/远程触发场景下 PC 无人值守，以下配置缺一不可，否则 BetterGI 会被抢焦点或卡死：
+
+1. **BetterGI 开启焦点强制恢复**：设置 → 其他设置 → 开启「**游戏失去焦点时候，强制恢复激活游戏窗口**」（默认关闭）。开启后调度器任务失去焦点时会自动抢回游戏窗口。副作用：开启后**人工切出游戏需先暂停任务**（它会一直抢焦点）；无人值守场景无影响。
+2. **关闭 QQ/微信开机自启**：WOL 唤醒登录后聊天软件自启弹窗会抢走游戏焦点，BetterGI 反复「不是原神，暂停」。微信：设置 → 通用 → 关闭开机自启；QQ：设置 → 登录 → 关闭开机自启；或任务管理器 → 启动应用禁用。无法关闭时，可配置 `[execution] pre_launch_script` 兜底（拉起 BetterGI 前 taskkill 掉它们，见 `config.toml.example`）。
+3. **自动登录确认**：`netplwiz` 确认已勾选自动登录（WOL 唤醒后要能直接进桌面，BetterGI 才看得见游戏窗口）。
+4. **无人值守链路不要用 `lock` 收尾**：`after_done = "lock"` 锁屏后，WOL 唤醒不解锁桌面（Windows 自动登录只在登录/重启时生效），BetterGI 看不见桌面导致下次任务失败。无人值守统一用 `sleep`（默认）或 `shutdown`。
+
 ## 任务清单与热加载
 
 任务来源由 `config.toml` 的 `[tasks] dir` 指定（默认 `tasks` 目录）。该目录下所有 `*.json` 会被读取并合并，每个文件可以是单个任务对象或任务数组：

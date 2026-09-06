@@ -41,8 +41,15 @@ const tabs = [
   { path: '/settings', icon: iconSettings, iconGray: iconSettingsGray, label: '设置' },
 ] as const
 
+/** tab 直系子页（/tasks/xxx）由 startsWith 前缀自动覆盖；
+ *  首段不等于父 tab 的路由在此登记（如 /logs 归属 历史 tab）。 */
+const PARENT_TAB: Record<string, string> = { '/logs': '/history' }
+
 function isActive(path: string): boolean {
-  return route.path === path
+  if (route.path === path) return true
+  if (route.path.startsWith(path + '/')) return true   // tab 直系子页
+  const seg2 = route.path.split('/').slice(0, 2).join('/')
+  return PARENT_TAB[seg2] === path                     // 登记的跨归属子页
 }
 
 function go(path: string): void {

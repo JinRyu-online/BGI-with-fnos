@@ -91,23 +91,25 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="detail-page">
-    <div class="detail-top">
+    <!-- 单条 sticky 头部容器：返回行 + 摘要卡整体钉住，避免双层 sticky 露缝 -->
+    <div class="detail-header">
       <button class="back-btn" @click="goBack">
         <span class="back-chevron">‹</span> 返回
       </button>
-    </div>
 
-    <!-- sticky 摘要卡 -->
-    <div class="card summary-card">
-      <div class="sum-row">
-        <StateBadge v-if="record" :state="record.state ?? ''" />
-        <span class="sum-name">{{ record?.display_name || record?.task_id || jobId }}</span>
-        <span v-if="record?.schedule_id" class="sum-sched">定时</span>
+      <!-- 摘要卡（浅色历史卡风格，随容器整体 sticky，自身不再 sticky） -->
+      <div class="card summary-card">
+        <div class="sum-row">
+          <StateBadge v-if="record" :state="record.state ?? ''" />
+          <span class="sum-name">{{ record?.display_name || record?.task_id || jobId }}</span>
+          <span v-if="record?.schedule_id" class="sum-sched">定时</span>
+        </div>
+        <div class="sum-times">
+          开始 {{ fmtDT(record?.created_at) }} · 结束 {{ record?.finished_at ? fmtDT(record.finished_at) : '—' }} · 用时 {{ durText }}
+        </div>
+        <div class="sum-jobid">#{{ jobId }}</div>
       </div>
-      <div class="sum-times">
-        开始 {{ fmtDT(record?.created_at) }} · 结束 {{ record?.finished_at ? fmtDT(record.finished_at) : '—' }} · 用时 {{ durText }}
-      </div>
-      <div class="sum-jobid">#{{ jobId }}</div>    </div>
+    </div>
 
     <!-- 骨架屏 -->
     <template v-if="logHistoryState.loading">
@@ -160,7 +162,7 @@ onBeforeUnmount(() => {
           :show-badge="false"
           :on-load-more="logHistoryState.atMaxTail ? undefined : loadMore"
           :loading-more="logHistoryState.loadingMore"
-          body-height="60vh"
+          body-height="420px"
         >
           <template v-if="hitCount.active">
             <span class="head-hit">命中 {{ hitCount.hits }}/{{ hitCount.total }}</span>
@@ -173,11 +175,16 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .detail-page { display: flex; flex-direction: column; }
-/* 顶部返回条：sticky 在页面滚动容器顶部（.page 是滚动宿主） */
-.detail-top {
+
+/* 单条 sticky 头部容器：返回行 + 摘要卡整体钉住（双层 sticky 会露缝）。
+   水平负 margin 保留 —— 抵消 .page 左右内边距实现全宽贯通，否则内容从两侧缝穿出；
+   上下负值去掉，容器底用 border 分层。背景必须不透明，深色日志区滚动时不透出。 */
+.detail-header {
   position: sticky; top: 0; z-index: 5;
-  margin: -4px -4px var(--space-3);
+  margin: 0 -4px var(--space-3);
   padding: 4px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 .back-btn {
   position: relative;
@@ -190,10 +197,8 @@ onBeforeUnmount(() => {
 .back-btn::after { content: ''; position: absolute; inset: -2px -6px; }
 .back-chevron { font-size: 26px; line-height: 1; margin-top: -3px; }
 
-/* 摘要卡（浅色历史卡风格 + sticky） */
-.summary-card {
-  position: sticky; top: 44px; z-index: 4;
-}
+/* 摘要卡：随 .detail-header 整体 sticky，自身不再 sticky（top:44px 估算值已废弃） */
+.summary-card { margin: 0 4px var(--space-2); }
 .sum-row { display: flex; align-items: center; gap: var(--space-2); }
 .sum-name { flex: 1; min-width: 0; font-size: var(--font-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sum-sched {
@@ -254,5 +259,14 @@ onBeforeUnmount(() => {
   padding: 1px 8px; border-radius: var(--radius-full);
   background: rgba(255, 255, 255, .06); color: var(--log-head-text);
   flex-shrink: 0;
+}
+
+/* 短屏断点（iPhone SE 667px）：420px 日志区过高，压到 280px。
+   LogBody 的 height 是内联 style，需 :deep + !important 覆盖。
+   原则：固定 px，不用 vh 等动态单位（iOS 地址栏/键盘会动态重算导致拉长）。 */
+@media (max-height: 700px) {
+  .detail-page :deep(.log-scroll) {
+    height: 280px !important;
+  }
 }
 </style>
