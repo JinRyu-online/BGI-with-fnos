@@ -2,11 +2,14 @@
 // dev server 挂在 base=/spa/ 下（vite.config.ts），源文件模块也要带 /spa 前缀访问。
 const base = process.env.SMOKE_URL || 'http://localhost:5173'
 const paths = [
-  '/spa/', '/spa/tasks', '/spa/history', '/spa/settings',
+  '/spa/', '/spa/tasks', '/spa/schedules', '/spa/history', '/spa/settings',
   '/spa/src/main.ts', '/spa/src/App.vue',
   '/spa/src/pages/StatusPage.vue', '/spa/src/pages/TasksPage.vue',
+  '/spa/src/pages/SchedulesPage.vue',
   '/spa/src/pages/HistoryPage.vue', '/spa/src/pages/SettingsPage.vue',
-  '/spa/src/components/LogPanel.vue', '/spa/src/composables/useJob.ts',
+  '/spa/src/components/LogPanel.vue', '/spa/src/components/LogBody.vue',
+  '/spa/src/pages/LogDetailPage.vue', '/spa/src/composables/useLogHistory.ts',
+  '/spa/src/composables/useJob.ts',
   '/spa/src/constants.ts', '/spa/src/styles/tokens.css',
 ]
 let fail = 0

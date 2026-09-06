@@ -15,6 +15,7 @@ services:
     restart: unless-stopped
     environment:
       BGI_DATA_DIR: /data
+      TZ: Asia/Shanghai   # 定时任务按本地时间触发；镜像已装 tzdata
     volumes:
       - /var/apps/bgi-trigger/shares/bgi-trigger/data:/data
     build:

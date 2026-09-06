@@ -88,7 +88,19 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.chip-row { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+/* 筛选行：单行横滑（flex-wrap:nowrap + overflow-x:auto），刷新按钮 sticky 钉在可视区右缘。
+   坑 A：overflow-x:auto 会使 overflow-y 计算为 auto，chip::after 外扩 4px 的触控热区
+   会被裁剪甚至引发纵向滚动——用 padding:4px 0 + margin:-4px 0 补偿，
+   热区恰好落进容器内边距（36 内容 + 8 padding = 44），不再越界。不加渐变遮罩。 */
+.chip-row {
+  display: flex; gap: var(--space-2);
+  margin: -4px 0 var(--space-3);
+  padding: 4px 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox 隐藏滚动条 */
+}
+.chip-row::-webkit-scrollbar { display: none; } /* WebKit 隐藏滚动条 */
 .chip {
   position: relative;
   min-height: 36px;
@@ -96,11 +108,21 @@ onMounted(async () => {
   border: 1px solid var(--border); border-radius: var(--radius-full);
   background: var(--surface); color: var(--text-2);
   font-size: var(--font-sm); font-weight: 500;
+  /* chip 是原子块：不许内部断行、不许被压缩——iOS（CJK 文本任意字符可断）
+     上"刷新"两字被折成两行的问题即源于此 */
+  white-space: nowrap; flex-shrink: 0;
   transition: all .15s;
 }
 /* 扩大触控热区到 ≥44px（视觉 36px，命中区域外扩 4px） */
 .chip::after { content: ''; position: absolute; inset: -4px; }
 .chip.active { background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 600; }
-.chip-refresh { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.chip-refresh {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: auto;
+  /* 横滑时钉在可视区右缘（-webkit-sticky 兼容老 iOS） */
+  position: -webkit-sticky;
+  position: sticky;
+  right: 0;
+}
+.chip-refresh svg { flex-shrink: 0; }
 .spinner-dark { border-color: rgba(100, 116, 139, .35); border-top-color: var(--text-2); }
 </style>

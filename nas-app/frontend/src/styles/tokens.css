@@ -66,6 +66,7 @@
   --log-border: #3d4757;
   --log-text: #d8d3c5;
   --log-text-dim: #8a8474;
+  --log-head-text: #b8b2a2; /* 头部条文字/元信息：对 --log-head-bg ≈5.4:1（旧 #8a8474 仅 3.4:1 不达标） */
   --log-keyword: #ecc06a;   /* "任务结束"关键字 金 */
   --log-error: #e88a8a;     /* 错误行 红 */
   --log-sys: #7fc9c4;       /* 系统消息 青 */

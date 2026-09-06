@@ -34,6 +34,7 @@ def test_load_applies_defaults_for_missing_fields(tmp_path):
     assert config.execution.default_timeout_min == 90
     assert config.execution.default_after_done == "sleep"
     assert config.execution.grace_seconds == 30
+    assert config.execution.pre_launch_script == ""   # pre_launch_script 默认空=禁用
     assert config.bettergi.game_processes == ["YuanShen.exe", "GenshinImpact.exe"]
     # api_key absent -> generated on first run (covered in detail by the next test)
     assert config.auth.api_key != ""
@@ -99,6 +100,22 @@ def test_first_run_when_file_missing_writes_bare_config(tmp_path):
 
 
 # ── 配置简化：dir 推导 ──────────────────────────────────────────────────────
+
+def test_pre_launch_script_loaded_when_configured(tmp_path):
+    """[execution] pre_launch_script 显式配置 → 加载进 Execution dataclass。"""
+    cfg_path = tmp_path / "config.toml"
+    write_toml(cfg_path, {
+        "server": {"host": "0.0.0.0", "port": 8765},
+        "execution": {
+            "pre_launch_script": "taskkill /IM Weixin.exe /F & taskkill /IM QQ.exe /F",
+        },
+    })
+
+    config = ListenerConfig.load(cfg_path)
+
+    assert config.execution.pre_launch_script == \
+        "taskkill /IM Weixin.exe /F & taskkill /IM QQ.exe /F"
+
 
 def test_dir_derives_paths_when_fields_unset(tmp_path):
     """dir 非空 + 未显式字段 → exe_path/config_path/log_path 自动推导。"""

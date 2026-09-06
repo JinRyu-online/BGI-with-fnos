@@ -151,6 +151,34 @@ class TaskRegistry:
         self._maybe_reload()
         return list(self._by_id.values())
 
+    # ---- 写回（NAS GUI 编辑任务用）----
+
+    def _write_path(self) -> Path:
+        """写回目标文件。目录模式约定写 00_gui.json（排最前，人工编辑的其他文件可覆盖其任务）；
+        文件模式直接写该文件。"""
+        if self._path.is_dir():
+            return self._path / "00_gui.json"
+        return self._path
+
+    def save_all(self, tasks: list[dict]) -> list[Task]:
+        """整体替换任务清单并写回磁盘（先全部校验，任一非法则抛 ValueError 不落盘）。
+
+        目录模式只覆盖本模块写出的 00_gui.json——用户手写的其他 *.json 保留。
+        加载顺序为文件名序：00_gui.json 先加载，手写文件后加载；同 id 时手写
+        文件覆盖 GUI 版本（后写胜出，与 _reload 的 by_id 覆盖顺序一致）。
+        返回写回后的完整任务列表（含手写文件里的任务）。
+        """
+        validated = [self._build(item) for item in tasks]  # 任一非法抛 ValueError
+        write_path = self._write_path()
+        write_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [t.to_dict() for t in validated]
+        write_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self._signature = None  # 强制下轮访问重读（含手写文件合并结果）
+        self._maybe_reload()
+        return list(self._by_id.values())
+
 
 def _normalize(data):
     """把单个对象或数组统一成迭代器。"""

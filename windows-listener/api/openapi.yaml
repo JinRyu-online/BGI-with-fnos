@@ -98,6 +98,16 @@ components:
       type: object
       properties:
         detail: { type: string, example: unauthorized }
+    BgiGroupsResponse:
+      type: object
+      description: BetterGI「全自动-调度器」已有组名列表（供 NAS 编排任务时勾选）。
+      properties:
+        groups:
+          type: array
+          items: { type: string }
+          example: [日常一条龙, 挖矿一条龙, 关闭游戏]
+          description: 调度组名（User/ScriptGroup/*.json 的文件名 stem，Unicode 排序）。
+      required: [groups]
 paths:
   /health:
     get:
@@ -160,6 +170,33 @@ paths:
                       after_done: sleep
         '401':
           description: 密钥错误或缺失
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bad_key: { value: { detail: unauthorized } }
+  /bgi/groups:
+    get:
+      tags: [任务]
+      summary: 枚举 BetterGI 调度器已有组名
+      description: |
+        枚举本机 BetterGI「全自动-调度器」的已有调度组（`<bettergi.dir>/User/ScriptGroup/*.json`
+        的文件名 stem，排序后返回），供 NAS 任务编排时勾选组名。
+        `bettergi.dir` 未配置或目录不存在 → 返回空列表（200，不报错）。
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: 组名列表（可能为空）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BgiGroupsResponse' }
+              examples:
+                some_groups:
+                  value: { groups: [日常一条龙, 挖矿一条龙, 关闭游戏] }
+                empty:
+                  value: { groups: [] }
+        '401':
+          description: 密钥错误
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

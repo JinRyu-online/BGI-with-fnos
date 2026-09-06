@@ -43,3 +43,5 @@ skills-lock.json
 
 # Apifox CLI 本地配置（projectId 等）
 .apifox/
+nas-app/app/docker/etc/
+nas-app/app/docker/var/

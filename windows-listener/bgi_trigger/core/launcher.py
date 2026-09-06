@@ -50,8 +50,22 @@ if sys.platform == "win32":
     # CREATE_NEW_PROCESS_GROUP:子进程为新进程组长 + 自带控制台窗口,
     # 避免继承 pythonw.exe 的无控制台句柄导致 BetterGI 无法看见游戏窗口。
     _SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP
+    # pre_launch_script 用:pythonw 下跑 shell 命令不弹控制台闪窗
+    _PRE_LAUNCH_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
 else:
     _SUBPROCESS_CREATION_FLAGS = 0
+    _PRE_LAUNCH_CREATION_FLAGS = 0
+
+
+def _default_pre_launch_runner(script: str) -> None:
+    """pre_launch_script 默认执行器:cmd.exe(shell=True)+ 60s 超时 + 不弹窗。
+
+    非零退出码/超时由调用方按 WARNING 容错(不阻断 BetterGI 拉起)。
+    注意:超时只 kill cmd 直接子进程,PowerShell 等孙进程可能存活——
+    脚本须自行保证短命(文档已注明)。
+    """
+    subprocess.run(script, shell=True, timeout=60,
+                   creationflags=_PRE_LAUNCH_CREATION_FLAGS)
 
 
 def _default_popen(cmd: list[str], **kwargs) -> subprocess.Popen:
@@ -102,6 +116,9 @@ class Launcher:
     log_save_dir: job 全量日志落盘目录（None=不落盘）。listener 传入 BASE_DIR / "log"。
     line_sink: 日志收割桥回调，每收割一行调用一次（listener 注入 logging 回显）。
     abort_kills_game: /abort 时是否同时终止游戏进程（默认 True，可被配置覆盖）。
+    pre_launch_runner: 拉起前脚本执行器（注入便于测试替换，默认 cmd.exe + timeout 60
+        + CREATE_NO_WINDOW）。handoff 分支不执行；失败仅 WARNING 不阻断。
+    pre_launch_script: 拉起前脚本内容（来自 [execution] pre_launch_script，空=禁用）。
     """
 
     def __init__(
@@ -118,6 +135,8 @@ class Launcher:
         log_save_dir: str | Path | None = None,
         line_sink: Callable[[str], None] | None = None,
         abort_kills_game: bool = True,
+        pre_launch_script: str = "",
+        pre_launch_runner: Callable[[str], None] | None = None,
     ) -> None:
         self._exe = bettergi_exe
         self._game_processes = game_processes
@@ -136,6 +155,9 @@ class Launcher:
         self._line_sink = line_sink
         # ★ /abort 是否同时终止游戏进程
         self._abort_kills_game = abort_kills_game
+        # ★ 拉起前脚本内容（"" = 禁用）与执行器（None=默认 cmd 实现；测试注入 fake）
+        self._pre_launch_script = pre_launch_script
+        self._pre_launch_runner = pre_launch_runner or _default_pre_launch_runner
         # ★ 本 job 拉起的 BetterGI 进程(由 launch 守护线程赋值,供 /abort 主动终止)
         self._current_proc: subprocess.Popen | None = None
         self._proc_lock = threading.Lock()
@@ -268,6 +290,9 @@ class _BetterGIExecutor:
         self._jobs = launcher._jobs
         self._popen = launcher._popen
         self._sleep = launcher._sleep
+        # ★ pre_launch_script 内容与执行器（"" = 禁用）
+        self._pre_launch_script = launcher._pre_launch_script
+        self._pre_launch_runner = launcher._pre_launch_runner
         # ★ 启动前检测：BetterGI / 游戏是否已在运行（手动启动时也适用）。
         # 用进程文件名匹配，与 make_game_checker 同一逻辑（psutil 软依赖已延迟导入）。
         bettergi_name = os.path.basename(self._exe)
@@ -284,6 +309,30 @@ class _BetterGIExecutor:
             self._sleep(1.0)
         return killed
 
+    def _run_pre_launch_script(self, job: Job) -> bool:
+        """执行 pre_launch_script（真正 Popen 分支前；handoff 不执行）。
+
+        返回 False 表示脚本执行期间收到 /abort → 调用方直接归档 aborted、
+        不再拉起 BetterGI（消除"abort 空杀后脚本结束仍拉起"的时序洞）。
+        脚本非零退出/超时/异常仅 WARNING，不阻断拉起（返回 True）。
+        """
+        if not self._pre_launch_script:
+            return True
+        log.info("job %s: running pre_launch_script", job.id)
+        try:
+            self._pre_launch_runner(self._pre_launch_script)
+        except Exception:
+            # 失败容错（照 after_done 模式）：非零退出/超时/异常 → WARNING，不阻断
+            log.warning("job %s: pre_launch_script failed (non-blocking); "
+                        "continuing to launch BetterGI", job.id, exc_info=True)
+        # 脚本执行可能耗时（timeout 60s），期间 /abort 可能已置位 → 复查
+        if self._jobs.abort_requested():
+            log.info("job %s: abort requested during pre_launch_script; "
+                     "skipping launch", job.id)
+            self._jobs.finalize(JobState.ABORTED)
+            return False
+        return True
+
     def execute(self, job: Job, task) -> None:
         """实际执行流程（见模块文档）。"""
         # ★ 启动预检三分支：
@@ -295,6 +344,12 @@ class _BetterGIExecutor:
         bettergi_running = self._is_bettergi_running()
         game_running = self._is_game_running()
         proc: subprocess.Popen | None = None
+        # ★ pre_launch_script：仅真正 Popen 的分支前执行（handoff 接管不执行）。
+        #   脚本期间收到 /abort → 直接归档 aborted 返回，不再拉起。
+        if not bettergi_running and not game_running:
+            if not self._run_pre_launch_script(job):
+                self._cleanup_current_proc()
+                return
         if bettergi_running and game_running:
             log.info("job %s: already running (BetterGI=%s, game=%s); skip launching, "
                      "hand off to completion monitor", job.id, bettergi_running, game_running)

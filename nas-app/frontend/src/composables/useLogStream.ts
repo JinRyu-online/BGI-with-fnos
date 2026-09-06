@@ -25,10 +25,8 @@ interface LogStreamState {
   jobId: string
   wsState: WsState
   lines: LogLine[]
-  /** 逻辑总行数（角标用，不受 400 行裁剪影响） */
+  /** 逻辑总行数（角标用，不受 400 行裁剪影响；兼作 LogBody followKey） */
   totalLines: number
-  /** 用户上滑暂停自动跟随 */
-  scrollPaused: boolean
 }
 
 /** 模块级单例：页面切换不销毁日志面板状态（gui-design.md §3.3）。 */
@@ -37,7 +35,6 @@ export const logStreamState = reactive<LogStreamState>({
   wsState: 'closed',
   lines: [],
   totalLines: 0,
-  scrollPaused: false,
 })
 
 let ws: WebSocket | null = null
@@ -162,7 +159,6 @@ export function useLogStream() {
     logStreamState.jobId = jobId
     logStreamState.lines = []
     logStreamState.totalLines = 0
-    logStreamState.scrollPaused = false
     failCount = 0
     manualClose = false
     logAppendSys('[系统] 正在连接实时日志通道…')
@@ -183,7 +179,6 @@ export function useLogStream() {
     logStreamState.jobId = ''
     logStreamState.lines = []
     logStreamState.totalLines = 0
-    logStreamState.scrollPaused = false
   }
 
   return { logStreamState, open, close, reset }

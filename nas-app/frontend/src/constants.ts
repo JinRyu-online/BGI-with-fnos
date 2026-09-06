@@ -91,3 +91,23 @@ export const HISTORY_FILTERS = [
   { key: 'abnormal', label: '异常' },
 ] as const
 export type HistoryFilterKey = (typeof HISTORY_FILTERS)[number]['key']
+
+/** 星期文案（ISO：0=周一，与后端 weekdays 语义一致）。 */
+export const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'] as const
+
+/** 定时任务上次执行结果 → 中文 + 徽章 class。 */
+export const SCHEDULE_RESULT_MAP: Record<string, { zh: string; cls: string }> = {
+  dispatched: { zh: '已派发', cls: 'b-completing' },
+  triggered: { zh: '已触发', cls: 'b-done' },
+  skipped_busy: { zh: '跳过·Windows 忙', cls: 'b-timed_out' },
+  skipped_conflict: { zh: '跳过·同时刻冲突', cls: 'b-timed_out' },
+  wake_failed: { zh: '唤醒失败', cls: 'b-failed' },
+  wake_timeout: { zh: '唤醒超时', cls: 'b-failed' },
+  task_not_found: { zh: '任务不存在', cls: 'b-failed' },
+  error: { zh: '出错', cls: 'b-failed' },
+}
+
+export function scheduleResultMeta(result: string | null | undefined): { zh: string; cls: string } | null {
+  if (!result) return null
+  return SCHEDULE_RESULT_MAP[result] ?? { zh: result, cls: 'b-idle' }
+}

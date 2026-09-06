@@ -62,6 +62,12 @@ keep_history = 20
 # /abort 时是否同时终止游戏进程（true=中止任务连游戏一起杀，默认）。
 # false 则仅置 abort 信号并终止 BetterGI，游戏进程保持运行。
 abort_kills_game = true
+# 拉起 BetterGI 前执行的脚本（空=禁用）。无人值守兜底：如关闭 QQ/微信自启弹窗抢焦点。
+# ★ shell=True 走 cmd.exe，必须用 cmd 语法（taskkill /IM Weixin.exe /F & taskkill /IM QQ.exe /F）；
+#   超时 60 秒强杀（只杀 cmd 直接子进程，PowerShell 孙进程可能存活——脚本须自行保证短命）；
+#   失败仅告警不阻断拉起。
+# ★ TOML 手写序列化器零转义：值内避免反斜杠与双引号（路径用正斜杠）。
+# pre_launch_script = "taskkill /IM Weixin.exe /F & taskkill /IM QQ.exe /F"
 
 [tasks]
 # 任务清单来源目录。该目录下所有 *.json 会被读取并合并（每个文件可是单任务对象或数组）。

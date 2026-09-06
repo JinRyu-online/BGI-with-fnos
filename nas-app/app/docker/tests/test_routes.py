@@ -129,6 +129,42 @@ def test_tasks_unpaired_returns_400(tmp_path):
     assert r.status_code == 400
 
 
+def test_bgi_groups_returns_list(tmp_path):
+    """GET /api/bgi-groups 正常透传：返回 {"groups": [...]}。"""
+    fake = FakeClient()
+    fake.bgi_groups = lambda: ["日常一条龙", "挖矿", "关闭游戏"]
+    client = TestClient(_make(tmp_path, client=fake))
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 200
+    assert r.json() == {"groups": ["日常一条龙", "挖矿", "关闭游戏"]}
+
+
+def test_bgi_groups_unpaired_returns_400(tmp_path):
+    """未配对时 GET /api/bgi-groups 返回 400（与其他代理端点一致）。"""
+    client = TestClient(_make(tmp_path))
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 400
+
+
+def test_bgi_groups_old_listener_404_returns_empty(tmp_path):
+    """旧版监听器没有 /bgi/groups（404）→ 返回 {"groups": []} 而非 502。"""
+    fake = FakeClient()
+
+    def _raise_404():
+        from listener_client import ListenerNotFound
+        raise ListenerNotFound("not found: /bgi/groups")
+
+    fake.bgi_groups = _raise_404
+    client = TestClient(_make(tmp_path, client=fake))
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+
+    r = client.get("/api/bgi-groups")
+    assert r.status_code == 200
+    assert r.json() == {"groups": []}
+
+
 def test_tasks_after_pair_returns_list(tmp_path):
     app = _make(tmp_path, client=FakeClient(tasks_data=[{"id": "daily", "display_name": "日常", "groups": ["g"], "timeout_min": 90, "after_done": "sleep"}]))
     c = TestClient(app)
@@ -283,3 +319,51 @@ def test_scan_with_explicit_subnet_skips_fallback(tmp_path):
 
     assert r.status_code == 200
     assert calls == ["1.2.3.0/24"]  # 显式 → 只搜这一网,无 fallback
+
+
+def test_tasks_replace_proxy(tmp_path):
+    """PUT /api/tasks 转发到 Windows PUT /tasks；未配对 400。"""
+    from main import create_app
+
+    captured = {}
+
+    def fake_factory(url, key):
+        class _C:
+            def replace_tasks(self, tasks):
+                captured["tasks"] = tasks
+                return [{"id": t["id"], "display_name": t["display_name"],
+                         "groups": t["groups"], "timeout_min": t["timeout_min"],
+                         "after_done": t["after_done"]} for t in tasks]
+        return _C()
+
+    app = create_app(
+        config_path=str(tmp_path / "config.json"),
+        history_path=str(tmp_path / "jobs.json"),
+        client_factory=fake_factory, reconcile_interval=0, scheduler_interval=0,
+    )
+    from settings import Settings
+    s = Settings(tmp_path / "config.json")
+    cfg = s.load()
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["api_key"] = "k"
+    s.save(cfg)
+
+    client = TestClient(app)
+    body = {"tasks": [{"id": "mining", "display_name": "挖矿", "groups": ["采矿"],
+                       "timeout_min": 45, "after_done": "sleep"}]}
+    r = client.put("/api/tasks", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["id"] == "mining"
+    assert captured["tasks"][0]["id"] == "mining"
+
+
+def test_tasks_replace_unpaired(tmp_path):
+    from main import create_app
+    app = create_app(
+        config_path=str(tmp_path / "config.json"),
+        history_path=str(tmp_path / "jobs.json"),
+        reconcile_interval=0, scheduler_interval=0,
+    )
+    client = TestClient(app)
+    r = client.put("/api/tasks", json={"tasks": []})
+    assert r.status_code == 400

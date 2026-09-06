@@ -62,6 +62,10 @@ class HistoryStore:
             merged.setdefault("created_at", prev.get("created_at"))
             merged.setdefault("finished_at", prev.get("finished_at"))
             merged.setdefault("display_name", prev.get("display_name"))
+            # 定时任务溯源：schedule_id 在触发时写入，终态更新必须保留
+            # （否则 reconcile 落终态时该字段被整体替换丢失，前端无法显示"定时"徽章）
+            if "schedule_id" in prev:
+                merged.setdefault("schedule_id", prev.get("schedule_id"))
         items.insert(0, merged)  # 最新在前
         items = items[: self._keep]
         self._save(items)

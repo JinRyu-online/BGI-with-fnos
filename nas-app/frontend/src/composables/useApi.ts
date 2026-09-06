@@ -9,7 +9,7 @@ import { MockHttpError, mockApi } from '../mock/server'
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
   ScanAck, ScanProgress, DeviceInfo, DiscoverKeyAck,
-  AbortAck, StopAck, WolAck,
+  AbortAck, StopAck, WolAck, ScheduleItem, LogBundle,
 } from '../types'
 
 export interface ApiError extends Error {
@@ -48,6 +48,16 @@ export const api = {
   getTasks(): Promise<BgiTask[]> {
     if (mockEnabled) return mockApi.getTasks()
     return request<BgiTask[]>('GET', '/api/tasks')
+  },
+
+  getBgiGroups(): Promise<{ groups: string[] }> {
+    if (mockEnabled) return mockApi.getBgiGroups()
+    return request<{ groups: string[] }>('GET', '/api/bgi-groups')
+  },
+
+  putTasks(tasks: BgiTask[]): Promise<BgiTask[]> {
+    if (mockEnabled) return mockApi.putTasks(tasks)
+    return request<BgiTask[]>('PUT', '/api/tasks', { tasks })
   },
 
   startScan(subnet?: string): Promise<ScanAck> {
@@ -90,6 +100,13 @@ export const api = {
     return request<JobRecord[]>('GET', '/api/jobs')
   },
 
+  /** 历史任务日志回看：tail 默认 1000、后端钳制上限 5000；404 = 无录制 */
+  getLogs(jobId: string, tail?: number): Promise<LogBundle> {
+    if (mockEnabled) return mockApi.getLogs(jobId, tail)
+    const q = tail ? `?tail=${tail}` : ''
+    return request<LogBundle>('GET', `/api/logs/${encodeURIComponent(jobId)}${q}`)
+  },
+
   abort(): Promise<AbortAck> {
     if (mockEnabled) return mockApi.abort()
     return request<AbortAck>('POST', '/api/abort')
@@ -103,6 +120,29 @@ export const api = {
   wol(mac?: string): Promise<WolAck> {
     if (mockEnabled) return mockApi.wol(mac)
     return request<WolAck>('POST', '/api/wol', mac ? { mac } : {})
+  },
+
+  getSchedules(): Promise<ScheduleItem[]> {
+    if (mockEnabled) return mockApi.getSchedules()
+    return request<ScheduleItem[]>('GET', '/api/schedules')
+  },
+
+  putSchedules(schedules: ScheduleItem[]): Promise<ScheduleItem[]> {
+    if (mockEnabled) return mockApi.putSchedules()
+    // 回传时剥掉运行元数据（后端只收 config.schedules 结构）
+    const slim = schedules.map(({ next_fire_at, last_fired_at, last_result, last_error, ...rest }) => rest)
+    return request<ScheduleItem[]>('PUT', '/api/schedules', { schedules: slim })
+  },
+
+  runSchedule(id: string): Promise<{ dispatched: boolean; id: string }> {
+    if (mockEnabled) return mockApi.runSchedule(id)
+    return request<{ dispatched: boolean; id: string }>('POST', `/api/schedules/${encodeURIComponent(id)}/run`)
+  },
+
+  scheduleState(id: string): Promise<{ last_fired_at: number | null; last_job_id: string | null; last_result: string; last_error: string | null }> {
+    if (mockEnabled) return mockApi.scheduleState(id)
+    return request<{ last_fired_at: number | null; last_job_id: string | null; last_result: string; last_error: string | null }>(
+      'GET', `/api/schedules/${encodeURIComponent(id)}/state`)
   },
 }
 

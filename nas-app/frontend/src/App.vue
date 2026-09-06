@@ -11,7 +11,6 @@ import { useConfig } from './composables/useConfig'
 import { bootRuntime } from './composables/jobRuntime'
 import ToastHost from './components/ToastHost.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
-import { showConfirm } from './composables/useConfirm'
 import logoUrl from './assets/tabicons/logo.png'
 import iconStatus from './assets/tabicons/status.png'
 import iconStatusGray from './assets/tabicons/status_gray.png'
@@ -21,6 +20,8 @@ import iconHistory from './assets/tabicons/history.png'
 import iconHistoryGray from './assets/tabicons/history_gray.png'
 import iconSettings from './assets/tabicons/settings.png'
 import iconSettingsGray from './assets/tabicons/settings_gray.png'
+import iconSchedules from './assets/tabicons/schedules.png'
+import iconSchedulesGray from './assets/tabicons/schedules_gray.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,30 +36,24 @@ const deviceChip = computed(() => {
 const tabs = [
   { path: '/', icon: iconStatus, iconGray: iconStatusGray, label: '状态' },
   { path: '/tasks', icon: iconTasks, iconGray: iconTasksGray, label: '任务' },
+  { path: '/schedules', icon: iconSchedules, iconGray: iconSchedulesGray, label: '定时' },
   { path: '/history', icon: iconHistory, iconGray: iconHistoryGray, label: '历史' },
   { path: '/settings', icon: iconSettings, iconGray: iconSettingsGray, label: '设置' },
 ] as const
 
+/** tab 直系子页（/tasks/xxx）由 startsWith 前缀自动覆盖；
+ *  首段不等于父 tab 的路由在此登记（如 /logs 归属 历史 tab）。 */
+const PARENT_TAB: Record<string, string> = { '/logs': '/history' }
+
 function isActive(path: string): boolean {
-  return route.path === path
+  if (route.path === path) return true
+  if (route.path.startsWith(path + '/')) return true   // tab 直系子页
+  const seg2 = route.path.split('/').slice(0, 2).join('/')
+  return PARENT_TAB[seg2] === path                     // 登记的跨归属子页
 }
 
 function go(path: string): void {
   if (!isActive(path)) void router.push(path)
-}
-
-/* ---- 退出应用：关闭标签页（WebView 内通常直接关掉容器页）；失败则回 NAS 首页 ---- */
-const exiting = ref(false)
-async function onExit(): Promise<void> {
-  const ok = await showConfirm('退出应用', '关闭 BetterGI Trigger 并返回？', '退出')
-  if (!ok) return
-  exiting.value = true
-  window.close()
-  // window.close() 对非脚本打开的标签页通常无效——兜底跳回源站首页（飞牛入口页）
-  setTimeout(() => {
-    exiting.value = false
-    location.href = '/'
-  }, 300)
 }
 
 const ready = ref(false)
@@ -74,7 +69,6 @@ onMounted(async () => {
       <img class="app-logo" :src="logoUrl" alt="" />
       <div class="app-title">BetterGI Trigger</div>
       <div class="device-chip" :class="{ unpaired: !paired }">{{ deviceChip }}</div>
-      <button class="exit-btn" :disabled="exiting" aria-label="退出应用" @click="onExit">✕</button>
     </header>
 
     <main class="pages">
@@ -111,17 +105,6 @@ onMounted(async () => {
   border-radius: 8px;
   flex-shrink: 0;
 }
-.exit-btn {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  margin-left: 6px;
-  border: none; border-radius: 50%;
-  background: var(--surface-2); color: var(--text-3);
-  font-size: 13px; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background .15s, color .15s, transform .06s;
-}
-.exit-btn:active { transform: scale(.92); background: var(--danger-weak); color: var(--danger); }
 
 .tab-icon {
   width: 26px;

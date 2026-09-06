@@ -44,6 +44,7 @@ DEFAULTS: dict = {
         "grace_seconds": 30,          # 完成判定命中后的反悔窗口（秒），期间可 /abort 阻止收尾
         "keep_history": 20,           # 内存中保留的最近任务历史条数
         "abort_kills_game": True,     # /abort 时是否同时终止游戏进程
+        "pre_launch_script": "",      # 拉起 BetterGI 前执行的 cmd 脚本（空=禁用），如关闭聊天自启
     },
     "tasks": {
         # 任务清单来源目录（相对路径相对于监听器目录）。该目录下所有 *.json 热加载。
@@ -90,6 +91,9 @@ class Execution:
     keep_history: int
     # ★ /abort 时是否同时终止游戏进程（True=abort 连游戏一起杀，默认）
     abort_kills_game: bool = True
+    # ★ 拉起 BetterGI 前执行的 cmd 脚本（空=禁用）。带默认值排尾部（dataclass 约定）。
+    #   仅真正 Popen 分支执行（handoff 接管不执行）；失败仅 WARNING 不阻断。
+    pre_launch_script: str = ""
 
 
 @dataclass

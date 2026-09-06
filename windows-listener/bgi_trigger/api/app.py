@@ -4,14 +4,15 @@
 使本模块可在不依赖真实 BetterGI 的情况下单元测试（用 TestClient + 假启动回调）。
 
 接口概览：
-  GET  /health   免鉴权，返回服务身份签名（供 NAS 扫描识别）
-  GET  /key      免鉴权，返回 {api_key, hostname}（供 NAS 自动配对）
-  GET  /tasks    鉴权，返回任务清单
-  POST /trigger  鉴权，启动任务，返回 job_id（202）；忙时 409；未知任务 404
-  GET  /status   鉴权，按 job_id 查任务状态
-  POST /abort    鉴权，中止当前任务（含主动终止 BetterGI 进程）
-  POST /stop     鉴权，急停：清理所有 BetterGI/游戏进程 + abort 活动任务
-                 （"卡死后自救"入口：无活动 job 时也照常清理残留进程）
+  GET  /health     免鉴权，返回服务身份签名（供 NAS 扫描识别）
+  GET  /key        免鉴权，返回 {api_key, hostname}（供 NAS 自动配对）
+  GET  /tasks      鉴权，返回任务清单
+  POST /trigger    鉴权，启动任务，返回 job_id（202）；忙时 409；未知任务 404
+  GET  /status     鉴权，按 job_id 查任务状态
+  POST /abort      鉴权，中止当前任务（含主动终止 BetterGI 进程）
+  POST /stop       鉴权，急停：清理所有 BetterGI/游戏进程 + abort 活动任务
+                   （"卡死后自救"入口：无活动 job 时也照常清理残留进程）
+  GET  /bgi/groups 鉴权，枚举 BetterGI「全自动-调度器」已有组名（供 NAS 编排任务）
 """
 from __future__ import annotations
 
@@ -72,6 +73,11 @@ class AppDeps:
     # 完成判定 B 监视的游戏进程名（/stop 与 /abort 的进程清理匹配用）
     game_processes: list[str] = dataclass_field(default_factory=list)
 
+    # ★ GET /bgi/groups 的组名枚举回调（DI——端点层绝不读 config.toml）：
+    #   默认实现由 listener.py 装配（bettergi.dir → <dir>/User/ScriptGroup/*.json
+    #   的文件名 stem 排序）。None 时端点返回 {"groups": []}（测试/未配置场景）。
+    bgi_groups_reader: Callable[[], list[str]] | None = None
+
     @property
     def api_key(self) -> str:
         """配对密钥（供 /key 接口暴露）。见 auth.api_key。"""
@@ -96,6 +102,20 @@ class AppDeps:
 class TriggerBody(BaseModel):
     """POST /trigger 请求体。"""
     task_id: str
+
+
+class TaskBody(BaseModel):
+    """PUT /tasks 单个任务定义（校验规则同 TaskRegistry._build）。"""
+    id: str
+    display_name: str = ""
+    groups: list[str]
+    timeout_min: int = 90
+    after_done: str = "sleep"
+
+
+class TaskListBody(BaseModel):
+    """PUT /tasks 请求体：整体替换清单。"""
+    tasks: list[TaskBody]
 
 
 def create_app(deps: AppDeps) -> FastAPI:
@@ -139,6 +159,45 @@ def create_app(deps: AppDeps) -> FastAPI:
         tasks = [t.to_dict() for t in deps.tasks.all()]
         log.info("tasks listed for %s (%d tasks)", client_ip, len(tasks))
         return tasks
+
+    @app.put("/tasks")
+    def replace_tasks(request: Request, body: TaskListBody,
+                      authorization: str | None = Header(default=None)) -> list[dict]:
+        """整体替换任务清单（NAS GUI 编辑用）：全量校验后写回 tasks 文件/目录。
+
+        任一任务非法 → 400（不落盘）；成功返回替换后的完整清单（目录模式含
+        手写 *.json 里的任务，同 id 时手写文件覆盖 GUI 版本）。写回后 mtime
+        热加载自动生效，无需重启监听器。
+        """
+        client_ip = request.client.host if request.client else "?"
+        authenticate(request, authorization)
+        try:
+            tasks = deps.tasks.save_all([t.model_dump() for t in body.tasks])
+        except ValueError as e:
+            log.warning("tasks replace rejected from %s: %s", client_ip, e)
+            raise HTTPException(status_code=400, detail=str(e))
+        log.info("tasks replaced by %s (%d tasks)", client_ip, len(tasks))
+        return [t.to_dict() for t in tasks]
+
+    @app.get("/bgi/groups")
+    def bgi_groups(request: Request, authorization: str | None = Header(default=None)) -> dict:
+        """枚举 BetterGI「全自动-调度器」已有组名（供 NAS 编排任务时勾选）。
+
+        组名来源由 deps.bgi_groups_reader 注入（listener.py 装配：
+        bettergi.dir → <dir>/User/ScriptGroup/*.json 的文件名 stem 排序）。
+        未注入（None）或读取异常 → {"groups": []}，不阻塞调用方。
+        """
+        client_ip = request.client.host if request.client else "?"
+        authenticate(request, authorization)
+        groups: list[str] = []
+        if deps.bgi_groups_reader is not None:
+            try:
+                groups = list(deps.bgi_groups_reader())
+            except Exception:
+                log.exception("bgi/groups: groups reader failed (from %s)", client_ip)
+                groups = []
+        log.debug("bgi/groups listed for %s (%d groups)", client_ip, len(groups))
+        return {"groups": groups}
 
     @app.post("/trigger", status_code=202)
     def trigger(body: TriggerBody, request: Request,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * 任务卡（照原型 §4.3）：显示名 + 触发按钮；分组链 pill；时长/收尾属性 pill。
+ * 任务卡（照原型 §4.3）：显示名 + 触发按钮 + 可选操作区（插槽，父级放竖三点菜单）；
+ * 分组链 pill；时长/收尾属性 pill。
  */
 import type { BgiTask } from '../types'
 import { AFTER_DONE_LABEL, AFTER_DONE_ICON } from '../constants'
@@ -14,6 +15,7 @@ defineProps<{ task: BgiTask }>()
   <div class="card task-card">
     <div class="tc-head">
       <div class="tc-name">{{ task.display_name }}</div>
+      <slot name="actions"></slot>
       <TriggerButton :task-id="task.id" />
     </div>
     <div class="groups">
@@ -30,7 +32,7 @@ defineProps<{ task: BgiTask }>()
 </template>
 
 <style scoped>
-.task-card .tc-head { display: flex; align-items: center; gap: var(--space-3); }
+.task-card .tc-head { display: flex; align-items: center; gap: var(--space-2); }
 .tc-name { flex: 1; min-width: 0; font-size: var(--font-lg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-card .groups { margin-top: 8px; }
 </style>

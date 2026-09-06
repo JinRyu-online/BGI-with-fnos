@@ -3,6 +3,7 @@ line_sink 桥接、log_save_dir 落盘路径、terminate 后 wait。
 
 不依赖真实进程：Popen / 进程检测全部注入 fake。
 """
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -52,7 +53,8 @@ class FakeChecker:
 
 
 def _make_launcher(jobs, popen_records, monkeypatch,
-                   log_save_dir=None, line_sink=None, grace=0):
+                   log_save_dir=None, line_sink=None, grace=0,
+                   pre_launch_script="", pre_launch_runner=None):
     """构造 Launcher 并把 make_game_checker 换成可控 fake。"""
     L = Launcher(
         bettergi_exe=r"C:\BGI\BetterGI.exe",
@@ -65,6 +67,8 @@ def _make_launcher(jobs, popen_records, monkeypatch,
         sleep=lambda s: None,
         log_save_dir=log_save_dir,
         line_sink=line_sink,
+        pre_launch_script=pre_launch_script,
+        pre_launch_runner=pre_launch_runner,
     )
     checkers = {}
 
@@ -297,6 +301,176 @@ def test_preflight_none_running_popen_called(monkeypatch):
     ex.execute(job, _Task())
 
     assert len(popen_records) == 1
+
+
+# ── pre_launch_script：拉起前脚本（空不执行/执行/失败不阻断/abort 复查跳过）──
+
+def test_pre_launch_empty_script_not_executed(monkeypatch):
+    """pre_launch_script 为空（默认）→ runner 不被调用，正常拉起。"""
+    jobs = JobStore()
+    job = jobs.start("t", ["g1"])
+    popen_records = []
+    runner_calls = []
+    L, _ = _make_launcher(jobs, popen_records, monkeypatch,
+                          pre_launch_script="",
+                          pre_launch_runner=lambda s: runner_calls.append(s))
+
+    class FakeMonitor:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait(self, timeout_sec=None):
+            return "game_exited"
+
+    monkeypatch.setattr(launcher_mod, "CompletionMonitor", FakeMonitor)
+
+    ex = launcher_mod._BetterGIExecutor(L)
+    ex._is_bettergi_running = lambda: False
+    ex._is_game_running = lambda: False
+    ex.execute(job, _Task())
+
+    assert runner_calls == []          # 空脚本不执行
+    assert len(popen_records) == 1     # 正常拉起
+
+
+def test_pre_launch_script_called_before_popen(monkeypatch):
+    """配置了脚本 → runner 收到脚本内容，且先于 Popen 执行。"""
+    jobs = JobStore()
+    job = jobs.start("t", ["g1"])
+    order = []
+    popen_records = []
+
+    def recording_popen(cmd):
+        order.append("popen")
+        popen_records.append(cmd)
+        return FakeProc()
+
+    L = Launcher(
+        bettergi_exe=r"C:\BGI\BetterGI.exe",
+        game_processes=["YuanShen.exe"],
+        log_path="", log_done_keyword="", grace_seconds=0,
+        jobs=jobs,
+        subprocess_runner=recording_popen,
+        sleep=lambda s: None,
+        pre_launch_script="taskkill /IM Weixin.exe /F",
+        pre_launch_runner=lambda s: order.append("script:" + s),
+    )
+    checkers = {}
+
+    def fake_checker_factory(names):
+        c = FakeChecker(False, False)
+        c._which = "b" if "BetterGI" in names[0] else "g"
+        checkers[c._which] = c
+        return c
+
+    monkeypatch.setattr(launcher_mod, "make_game_checker", fake_checker_factory)
+
+    class FakeMonitor:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait(self, timeout_sec=None):
+            return "game_exited"
+
+    monkeypatch.setattr(launcher_mod, "CompletionMonitor", FakeMonitor)
+
+    ex = launcher_mod._BetterGIExecutor(L)
+    ex._is_bettergi_running = lambda: False
+    ex._is_game_running = lambda: False
+    ex.execute(job, _Task())
+
+    assert order == ["script:taskkill /IM Weixin.exe /F", "popen"]   # 先脚本后拉起
+    assert len(popen_records) == 1
+
+
+def test_pre_launch_runner_failure_does_not_block(monkeypatch):
+    """runner 抛异常（非零退出/超时的模拟）→ 仅 WARNING，不阻断拉起。"""
+    jobs = JobStore()
+    job = jobs.start("t", ["g1"])
+    popen_records = []
+
+    def bad_runner(script):
+        raise subprocess.TimeoutExpired(cmd=script, timeout=60)
+
+    L, _ = _make_launcher(jobs, popen_records, monkeypatch,
+                          pre_launch_script="bad command",
+                          pre_launch_runner=bad_runner)
+
+    class FakeMonitor:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait(self, timeout_sec=None):
+            return "game_exited"
+
+    monkeypatch.setattr(launcher_mod, "CompletionMonitor", FakeMonitor)
+
+    ex = launcher_mod._BetterGIExecutor(L)
+    ex._is_bettergi_running = lambda: False
+    ex._is_game_running = lambda: False
+    ex.execute(job, _Task())   # 不应抛异常
+
+    assert len(popen_records) == 1                     # 仍正常拉起
+    assert jobs.get(job.id).state == JobState.ABNORMAL_EXIT
+
+
+def test_pre_launch_abort_requested_skips_launch(monkeypatch):
+    """脚本执行期间 /abort 置位 → 归档 aborted，不拉起 BetterGI。"""
+    jobs = JobStore()
+    job = jobs.start("t", ["g1"])
+    popen_records = []
+
+    def aborting_runner(script):
+        jobs.set_abort_signal()   # 模拟脚本执行期间收到 /abort
+
+    L, _ = _make_launcher(jobs, popen_records, monkeypatch,
+                          pre_launch_script="long task",
+                          pre_launch_runner=aborting_runner)
+
+    class FakeMonitor:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait(self, timeout_sec=None):
+            return "timeout"
+
+    monkeypatch.setattr(launcher_mod, "CompletionMonitor", FakeMonitor)
+
+    ex = launcher_mod._BetterGIExecutor(L)
+    ex._is_bettergi_running = lambda: False
+    ex._is_game_running = lambda: False
+    ex.execute(job, _Task())
+
+    assert popen_records == []                         # 未拉起
+    assert jobs.get(job.id).state == JobState.ABORTED  # 直接归档 aborted
+
+
+def test_pre_launch_not_executed_on_handoff(monkeypatch):
+    """handoff 接管分支（都在跑）→ 脚本不执行。"""
+    jobs = JobStore()
+    job = jobs.start("t", ["g1"])
+    popen_records = []
+    runner_calls = []
+    L, _ = _make_launcher(jobs, popen_records, monkeypatch,
+                          pre_launch_script="echo hi",
+                          pre_launch_runner=lambda s: runner_calls.append(s))
+
+    class FakeMonitor:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait(self, timeout_sec=None):
+            return "game_exited"
+
+    monkeypatch.setattr(launcher_mod, "CompletionMonitor", FakeMonitor)
+
+    ex = launcher_mod._BetterGIExecutor(L)
+    ex._is_bettergi_running = lambda: True
+    ex._is_game_running = lambda: True
+    ex.execute(job, _Task())
+
+    assert runner_calls == []
+    assert popen_records == []
 
 
 # ── 任务 9：解除对 listener.BASE_DIR 的反向依赖 ──
