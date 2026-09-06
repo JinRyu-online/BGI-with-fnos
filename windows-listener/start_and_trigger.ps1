@@ -91,9 +91,23 @@ if (-not $skipStart) {
 Write-Host "[3/3] 发送触发请求，task_id = $TASK_ID ..." -ForegroundColor Cyan
 
 $body = @{ task_id = $TASK_ID } | ConvertTo-Json -Compress
+
+# 密钥从 config.toml 读取，避免硬编码入库（公开仓库泄露）
+$apiKey = ""
+$cfgPath = Join-Path $PSScriptRoot "config.toml"
+if (Test-Path $cfgPath) {
+    $m = Select-String -Path $cfgPath -Pattern '^\s*api_key\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($m) { $apiKey = $m.Matches[0].Groups[1].Value }
+}
+if ([string]::IsNullOrWhiteSpace($apiKey)) {
+    Write-Host "[ERROR] 未能从 config.toml 读取到 api_key，请确认已安装配置。" -ForegroundColor Red
+    Read-Host "按回车键退出"
+    exit 1
+}
+
 $headers = @{
     "User-Agent"    = "Apifox/1.0.0 (https://apifox.com)"
-    "Authorization" = "Bearer 8c38afc257d60668177baad82f7bd351"
+    "Authorization" = "Bearer $apiKey"
 }
 
 try {

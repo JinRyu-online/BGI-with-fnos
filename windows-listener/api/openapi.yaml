@@ -39,7 +39,7 @@ components:
       type: object
       description: 配对信息（密钥 + 主机名），供 NAS 自动填充配对表单。
       properties:
-        api_key: { type: string, example: "8c38afc257d60668177baad82f7bd351" }
+        api_key: { type: string, example: "your-api-key-here" }
         hostname: { type: string, example: DESKTOP-WIN }
       required: [api_key, hostname]
     Task:
@@ -140,7 +140,7 @@ paths:
               schema: { $ref: '#/components/schemas/PairingInfo' }
               examples:
                 ok:
-                  value: { api_key: "8c38afc257d60668177baad82f7bd351", hostname: "DESKTOP-WIN" }
+                  value: { api_key: "your-api-key-here", hostname: "DESKTOP-WIN" }
   /tasks:
     get:
       tags: [任务]
