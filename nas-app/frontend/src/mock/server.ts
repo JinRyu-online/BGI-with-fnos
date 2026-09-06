@@ -262,7 +262,7 @@ export const mockApi = {
   async wol(mac?: string): Promise<WolAck> {
     await sleep(300)
     const m = mac || MOCK_CONFIG.target_mac
-    return { sent: true, mac: m }
+    return { sent: true, mac: m, saved: false }
   },
 
   async getSchedules(): Promise<ScheduleItem[]> {

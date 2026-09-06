@@ -15,7 +15,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+import threading
 from pathlib import Path
+from typing import Callable
 
 # 默认配置：未配置文件或字段缺失时用此兜底。
 DEFAULT_CONFIG: dict = {
@@ -34,6 +36,13 @@ DEFAULT_CONFIG: dict = {
     # 元素结构见 docs/定时任务方案.md：{id, enabled, name, time, weekdays, task_id, wake, wake_timeout_sec, skip_if_busy}
     "schedules": [],
 }
+
+
+# 模块级锁：串行化所有 Settings 实例的 config.json load→modify→save 全程，
+# 消除同进程内「读-改-写」竞态（如 api_wol 写 target_mac 与 api_schedules_put
+# 整体替换 schedules 并发时互相覆盖丢数据）。仅锁配置文件；历史/日志/调度状态
+# 各自独立文件不受影响。调度线程只读 config.json，无需跨进程锁。
+_CONFIG_LOCK = threading.Lock()
 
 
 class Settings:
@@ -67,6 +76,19 @@ class Settings:
         self._path.write_text(
             json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+
+    def update(self, mutator: Callable[[dict], None]) -> dict:
+        """原子更新：load → mutator(config) → save 全程持模块级锁，返回新配置。
+
+        mutator 直接在加载出的 config dict 上原地修改；抛异常则不落盘。
+        需要改配置的端点（pair/unpair/wol/schedules）一律走本方法，
+        不要自行 load→save（会打开覆盖窗口）。
+        """
+        with _CONFIG_LOCK:
+            cfg = self.load()
+            mutator(cfg)
+            self.save(cfg)
+            return cfg
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

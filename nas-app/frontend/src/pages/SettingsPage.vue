@@ -11,7 +11,7 @@ import { useConfig, loadConfig } from '../composables/useConfig'
 import { forceStop } from '../composables/useJob'
 import { showConfirm } from '../composables/useConfirm'
 import { toast } from '../composables/useToast'
-import { MAC_RE, normalizeMac } from '../utils'
+import { MAC_RE } from '../utils'
 import type { DeviceInfo, SubnetProgress } from '../types'
 
 const { configState, paired } = useConfig()
@@ -126,8 +126,17 @@ async function sendWol(): Promise<void> {
   }
   wolBusy.value = true
   try {
+    const sentValue = mac
     const r = await api.wol(mac || undefined) // 空则用服务端配置
-    toast(`已发送 Magic Packet → ${normalizeMac(r.mac)}`, 'success')
+    // toast 用后端规范值（r.mac 已是 AA-BB-... 大写连字符）；saved=true 表示已持久化
+    const saved = r.saved === true
+    toast(saved ? `已发送 Magic Packet → ${r.mac}，已记住该 MAC` : `已发送 Magic Packet → ${r.mac}`, 'success')
+    // 条件回填：仅当输入框为空或等于本次发送值时才刷新（用户正在打新值不覆盖）
+    const current = macInput.value.trim()
+    if (!current || current === sentValue) {
+      await loadConfig()
+      if (configState.config?.target_mac) macInput.value = configState.config.target_mac
+    }
   } catch (e) {
     toast(`唤醒失败：${(e as Error).message}`, 'error')
   } finally {

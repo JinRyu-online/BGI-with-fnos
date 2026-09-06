@@ -120,7 +120,8 @@ export interface JobRecord {
 
 export interface AbortAck { aborted: boolean }
 export interface StopAck { stopped: boolean; killed: string[] }
-export interface WolAck { sent: boolean; mac: string }
+export interface WolAck { sent: boolean; mac: string; saved: boolean }
+/** mac 为后端规范值（AA-BB-CC-DD-EE-FF）；saved=true 表示本次已持久化到 target_mac */
 export interface DiscoverKeyAck { api_key: string; hostname: string }
 
 /** GET /api/logs/{job_id} 响应：历史任务日志（strings，前端 classifyLog 分类） */

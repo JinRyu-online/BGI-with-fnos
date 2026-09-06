@@ -67,6 +67,21 @@ def _sys_line(text: str) -> str:
     return f"[系统] {text}"
 
 
+def _normalize_mac(mac: str) -> str | None:
+    """规范化 MAC 为 AA-BB-CC-DD-EE-FF（大写连字符），非法返回 None（防御）。
+
+    复用 wol._parse_mac 的 cleaned 逻辑（容错 - : . 分隔与裸 12 位、大小写）；
+    保存 target_mac 前与「等价格式是否变化」的比较均用规范化值，避免
+    大小写/分隔符差异触发无谓写盘。
+    """
+    from wol import _parse_mac
+
+    try:
+        return "-".join(f"{b:02X}" for b in _parse_mac(mac))
+    except ValueError:
+        return None
+
+
 # ---------- 子网级扫描进度（模块级，线程安全） ----------
 _scan_lock = threading.Lock()
 _scan_progress: dict = {
@@ -178,6 +193,8 @@ class StopBody(BaseModel):
 class WolBody(BaseModel):
     mac: str | None = None
     """为空时回退到配置 target_mac；两者都空返回 400。"""
+    save: bool = True
+    """False 时只发包不落盘（临时唤醒别的机器场景），UI v1 不暴露该字段。"""
 
 
 class SchedulesBody(BaseModel):
@@ -771,19 +788,20 @@ def create_app(
         except ListenerError as e:
             raise HTTPException(status_code=502, detail=f"无法连接监听器：{e}")
 
-        cfg = settings.load()
-        cfg["default_target"] = {"ip": body.ip, "port": body.port, "hostname": body.hostname}
-        cfg["api_key"] = body.api_key
-        settings.save(cfg)
-        return {"ok": True, "target": cfg["default_target"]}
+        settings.update(lambda cfg: (
+            cfg.__setitem__("default_target",
+                            {"ip": body.ip, "port": body.port, "hostname": body.hostname}),
+            cfg.__setitem__("api_key", body.api_key),
+        ))
+        return {"ok": True, "target": settings.load()["default_target"]}
 
     @app.post("/api/unpair")
     def api_unpair() -> dict:
         """取消配对：清除默认目标与密钥。"""
-        cfg = settings.load()
-        cfg["default_target"] = None
-        cfg["api_key"] = ""
-        settings.save(cfg)
+        settings.update(lambda cfg: (
+            cfg.__setitem__("default_target", None),
+            cfg.__setitem__("api_key", ""),
+        ))
         return {"ok": True}
 
     @app.get("/api/config")
@@ -966,6 +984,11 @@ def create_app(
 
         body.mac 为空时回退配置 target_mac；两者都空返回 400。
         socket 异常（广播失败）映射为 502。
+
+        发送成功且 body.save=True（默认）时把规范化 MAC 持久化到 target_mac
+        （比较与落盘均用规范值：等价格式不重复写盘；保存走 settings.update
+        原子更新，不与 schedules 编辑互相覆盖）。save=False 只发包不落盘。
+        发送失败（400/502）一律不落盘。
         """
         from wol import send_magic_packet
 
@@ -980,7 +1003,16 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(e))
         except OSError as e:
             raise HTTPException(status_code=502, detail=f"魔术包发送失败：{e}")
-        return {"sent": True, "mac": mac}
+
+        # 发送成功才考虑持久化；规范化在发送之后（发送前已过 _parse_mac 校验，
+        # 此处正常不会 None，仍防御跳过保存）。
+        normalized = _normalize_mac(mac)
+        saved = False
+        if body.save and normalized:
+            saved = normalized != _normalize_mac(cfg.get("target_mac") or "")
+            if saved:
+                settings.update(lambda c: c.__setitem__("target_mac", normalized))
+        return {"sent": True, "mac": normalized or mac, "saved": saved}
 
     # ---------- 定时任务（schedules）----------
 
@@ -1036,9 +1068,8 @@ def create_app(
                 pass  # Windows 离线：跳过软校验
         except _Unpaired:
             pass
+        settings.update(lambda cfg: cfg.__setitem__("schedules", body.schedules))
         cfg = settings.load()
-        cfg["schedules"] = body.schedules
-        settings.save(cfg)
         # 清理已删除 schedule 的残留状态
         keep_ids = {s.get("id") for s in body.schedules}
         for sid in list(schedule_state.all().keys()):
