@@ -94,7 +94,8 @@ windows-listener/tasks/
     // 否则触发后 BetterGI 找不到组会失败。建议末尾放「关闭游戏」组，让游戏退出以触发完成判定 B
     "groups": ["日常一条龙", "关闭游戏"],
 
-    // 本任务最大执行时长（分钟）。超时则标记 state=timeout 并尝试清理残留进程
+    // 本任务最大执行时长（分钟）。超时则标记 state=timeout 并尝试清理残留进程。
+    // 0 = 不设任务级超时（由 24h 强制兜底 MAX_TASK_DURATION_SEC 收尾）
     "timeout_min": 90,
 
     // 任务完成后的收尾动作。可选值：
@@ -121,7 +122,7 @@ windows-listener/tasks/
 | `id` | string | 是 | 任务唯一标识，`/trigger` 引用 |
 | `display_name` | string | 否 | 显示名称，缺省取 `id` |
 | `groups` | string[] | 是 | BetterGI 调度器组名，须与 BetterGI 一致 |
-| `timeout_min` | int | 否 | 最大执行时长（分钟），缺省 90 |
+| `timeout_min` | int | 否 | 最大执行时长（分钟），缺省 90；`0` = 不限（由 24h 强制兜底 `MAX_TASK_DURATION_SEC` 收尾） |
 | `after_done` | string | 否 | 收尾动作，缺省 `sleep` |
 
 ## 依赖与镜像（国内友好）

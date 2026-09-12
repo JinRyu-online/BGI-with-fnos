@@ -80,6 +80,7 @@ export interface BgiTask {
   id: string
   display_name: string
   groups: string[]
+  /** 分钟；0 = 不限（24h 兜底） */
   timeout_min: number
   after_done: string
 }

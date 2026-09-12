@@ -25,7 +25,7 @@ defineProps<{ task: BgiTask }>()
       </template>
     </div>
     <div class="tc-props">
-      <span class="pill pill-time"><GIcon name="hourglass" :size="13" /> {{ task.timeout_min }} 分钟</span>
+      <span class="pill pill-time"><GIcon name="hourglass" :size="13" /> {{ task.timeout_min > 0 ? task.timeout_min + ' 分钟' : '不限' }}</span>
       <span class="pill pill-after"><GIcon :name="AFTER_DONE_ICON[task.after_done] || 'pause'" :size="13" /> {{ AFTER_DONE_LABEL[task.after_done] || task.after_done }}</span>
     </div>
   </div>

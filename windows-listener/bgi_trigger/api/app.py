@@ -23,7 +23,7 @@ from dataclasses import dataclass, field as dataclass_field
 from typing import Callable
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from bgi_trigger.service.auth import AuthError, AuthState
 from bgi_trigger.core.state import Job, JobState, JobStore
@@ -109,7 +109,8 @@ class TaskBody(BaseModel):
     id: str
     display_name: str = ""
     groups: list[str]
-    timeout_min: int = 90
+    # 0 = 不设任务级超时（24h 安全网兜底）；不加 le 上限（上限由前端 1-1440 约束）
+    timeout_min: int = Field(default=90, ge=0)
     after_done: str = "sleep"
 
 
@@ -166,8 +167,8 @@ def create_app(deps: AppDeps) -> FastAPI:
         """整体替换任务清单（NAS GUI 编辑用）：全量校验后写回 tasks 文件/目录。
 
         任一任务非法 → 400（不落盘）；成功返回替换后的完整清单（目录模式含
-        手写 *.json 里的任务，同 id 时手写文件覆盖 GUI 版本）。写回后 mtime
-        热加载自动生效，无需重启监听器。
+        手写 *.json 里的任务，同 id 时 GUI 写回的 99_gui.json 胜出）。写回后
+        mtime 热加载自动生效，无需重启监听器。
         """
         client_ip = request.client.host if request.client else "?"
         authenticate(request, authorization)

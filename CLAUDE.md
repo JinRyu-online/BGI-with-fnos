@@ -117,6 +117,8 @@ After completion, `grace_seconds` (default 30s) window allows `/abort` to skip t
 
 `tasks.py` watches the `tasks/` directory by file mtime signature. Any change to a `*.json` file is picked up on the *next* `/tasks` or `/trigger` request — no restart needed. Malformed files/entries are skipped with a warning log, never crash the whole registry. Each file can be a single task object or an array; `*.example` suffix files are ignored.
 
+**Directory load order**: handwritten `*.json` files load first (sorted by filename), then the GUI file `99_gui.json` loads last (enforced explicitly in code, not by filename sort — in codepoint order any letter-leading name sorts after digit-leading ones). On duplicate ids the GUI version wins; GUI edits are never shadowed by a handwritten file with the same id. `save_all` also deletes the legacy `00_gui.json` (one-time migration). `timeout_min` leaves blank/0 = no task-level timeout (24h `MAX_TASK_DURATION_SEC` hard-coded fallback stays).
+
 ### Key Non-Obvious Details
 
 - **`install.ps1`** runs as admin (auto-UAC elevation), creates venv, installs deps (uv with pip fallback), generates config from `.example`, registers the scheduled task `BGI-Trigger-Listener` (pythonw, no console, `/RL HIGHEST`).

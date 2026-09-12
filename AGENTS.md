@@ -131,6 +131,8 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 
 12. **Windows 端鉴权豁免**：`/health`（NAS 扫描身份识别，`service` 字段值 `"bgi-trigger"` 不可改）、`/key`（内网配对用）、WS 之外全部要求 `Authorization: Bearer <api_key>`。IP 白名单是审计层非门禁：密钥正确的首个请求自动学习来源 IP。
 
+13. **任务目录加载顺序：手写 `*.json` 按文件名排序在前 + `99_gui.json` 强制最后**（代码显式控制，不靠文件名排序——码点序中字母开头的文件名都排在数字开头之后）。同 id 时 GUI 编辑版本（99_gui.json）胜出、遮蔽手写文件（GUI 是主编辑面）；`save_all` 写回时顺带删除遗留的旧 `00_gui.json`（一次性迁移）。`timeout_min` 留空/0 = 不设任务级超时，回退 24h 硬编码 `MAX_TASK_DURATION_SEC` 兜底（该安全网不可配置，勿动）。
+
 ## 部署脚本（windows-listener/）
 
 | 脚本 | 作用 |

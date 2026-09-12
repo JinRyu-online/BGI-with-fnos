@@ -33,7 +33,7 @@ from typing import Callable
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
 from history import HistoryStore, default_history_path
@@ -212,7 +212,8 @@ class TaskItemBody(BaseModel):
     id: str
     display_name: str = ""
     groups: list[str]
-    timeout_min: int = 90
+    # 0 = 不设任务级超时（24h 安全网兜底）；与 Windows 端 TaskBody 约束一致（ge=0）
+    timeout_min: int = Field(default=90, ge=0)
     after_done: str = "sleep"
 
 

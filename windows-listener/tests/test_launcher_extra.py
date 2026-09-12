@@ -160,7 +160,7 @@ def test_timeout_min_capped_at_max_duration(monkeypatch):
 
 
 def test_timeout_min_zero_falls_back_to_max(monkeypatch):
-    """timeout_min<=0（异常数据）回退 MAX_TASK_DURATION_SEC 防呆。"""
+    """timeout_min<=0（0 = 不限的官方语义）回退 MAX_TASK_DURATION_SEC 24h 安全网。"""
     from bgi_trigger.core.execution import MAX_TASK_DURATION_SEC
     captured = {}
 

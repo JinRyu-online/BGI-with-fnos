@@ -23,6 +23,14 @@ log = logging.getLogger("bgi_trigger.tasks")
 # 使「无覆盖」的任务行为与全局默认相同）。
 DEFAULT_TIMEOUT_MIN = 90
 DEFAULT_AFTER_DONE = "sleep"
+# GUI 写回文件名。名字仅作标识，加载顺序由代码显式控制：非 GUI 文件按文件名
+# 排序在前，GUI 文件强制最后加载（同 id 时 GUI 版本胜出）——不依赖文件名排序
+# 启发式，因为码点序中任何字母开头的文件名（如 tasks.json）都排在数字开头的
+# 文件名之后，靠前缀数字并不能保证"最后加载"。
+GUI_FILENAME = "99_gui.json"
+# 历史遗留的旧 GUI 文件名（早期版本用 00_gui.json，码点序排在手写文件之前，
+# 导致 GUI 编辑被同 id 手写文件遮蔽）。save_all 写回时顺带删除，一次性迁移。
+LEGACY_GUI_FILENAME = "00_gui.json"
 # 合法的收尾动作枚举。
 VALID_AFTER_DONE = {"sleep", "shutdown", "lock", "none"}
 
@@ -77,10 +85,13 @@ class TaskRegistry:
     def _current_signature(self) -> tuple:
         """当前来源的签名：目录=各 *.json 的 (文件名, mtime)；文件=(文件名, mtime)。
 
-        签名变化（内容改、增删文件）即触发重读。"""
+        目录模式按实际加载顺序（非 GUI 文件名序在前 + GUI 文件最后）生成，
+        保证签名与加载顺序的确定性一致；签名变化（内容改、增删文件）即触发重读。"""
         if self._path.is_dir():
             files = sorted(self._path.glob("*.json"))
-            return tuple((f.name, f.stat().st_mtime) for f in files)
+            ordered = [f for f in files if f.name != GUI_FILENAME] + \
+                      [f for f in files if f.name == GUI_FILENAME]
+            return tuple((f.name, f.stat().st_mtime) for f in ordered)
         if self._path.exists():
             p = self._path
             return ((p.name, p.stat().st_mtime),)
@@ -106,9 +117,15 @@ class TaskRegistry:
         self._by_id = by_id
 
     def _iter_raw_items(self):
-        """枚举原始任务字典：目录=各 *.json 合并；文件=该文件。支持对象或数组。"""
+        """枚举原始任务字典：目录=各 *.json 合并；文件=该文件。支持对象或数组。
+
+        目录模式加载顺序：非 GUI 文件按文件名排序在前 + GUI 文件（99_gui.json）
+        强制最后——同 id 时后加载者胜出，即 GUI 编辑版本覆盖手写文件版本。"""
         if self._path.is_dir():
-            for f in sorted(self._path.glob("*.json")):
+            files = sorted(self._path.glob("*.json"))
+            ordered = [f for f in files if f.name != GUI_FILENAME] + \
+                      [f for f in files if f.name == GUI_FILENAME]
+            for f in ordered:
                 try:
                     data = json.loads(f.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError) as e:
@@ -130,11 +147,21 @@ class TaskRegistry:
         after_done = item.get("after_done", DEFAULT_AFTER_DONE)
         if after_done not in VALID_AFTER_DONE:
             raise ValueError(f"task {item['id']!r} invalid after_done: {after_done!r}")
+        # timeout_min 容错归一：None / 负数 / 非法值 → 0（0 = 不设任务级超时，
+        # 由 MAX_TASK_DURATION_SEC 24h 安全网兜底）。原先直接 int() 遇 null 抛
+        # TypeError 会炸掉整个 registry 构造（_reload 只捕获 ValueError）。
+        raw_timeout = item.get("timeout_min", DEFAULT_TIMEOUT_MIN)
+        try:
+            timeout_min = int(raw_timeout) if raw_timeout is not None else 0
+        except (TypeError, ValueError):
+            timeout_min = 0
+        if timeout_min < 0:
+            timeout_min = 0
         return Task(
             id=item["id"],
             display_name=item.get("display_name", item["id"]),
             groups=list(groups),
-            timeout_min=int(item.get("timeout_min", DEFAULT_TIMEOUT_MIN)),
+            timeout_min=timeout_min,
             after_done=after_done,
         )
 
@@ -154,23 +181,28 @@ class TaskRegistry:
     # ---- 写回（NAS GUI 编辑任务用）----
 
     def _write_path(self) -> Path:
-        """写回目标文件。目录模式约定写 00_gui.json（排最前，人工编辑的其他文件可覆盖其任务）；
+        """写回目标文件。目录模式写 99_gui.json——GUI 编辑是主编辑面，加载顺序
+        上 GUI 文件强制最后，同 id 时 GUI 版本胜出（覆盖手写文件里的同名任务）；
         文件模式直接写该文件。"""
         if self._path.is_dir():
-            return self._path / "00_gui.json"
+            return self._path / GUI_FILENAME
         return self._path
 
     def save_all(self, tasks: list[dict]) -> list[Task]:
         """整体替换任务清单并写回磁盘（先全部校验，任一非法则抛 ValueError 不落盘）。
 
-        目录模式只覆盖本模块写出的 00_gui.json——用户手写的其他 *.json 保留。
-        加载顺序为文件名序：00_gui.json 先加载，手写文件后加载；同 id 时手写
-        文件覆盖 GUI 版本（后写胜出，与 _reload 的 by_id 覆盖顺序一致）。
-        返回写回后的完整任务列表（含手写文件里的任务）。
+        目录模式只覆盖本模块写出的 99_gui.json——用户手写的其他 *.json 保留。
+        加载顺序为「非 GUI 文件名序在前 + GUI 文件最后」：同 id 时 GUI 版本
+        胜出（后加载者覆盖，与 _reload 的 by_id 覆盖顺序一致）。写回前顺带删除
+        遗留的旧 00_gui.json（历史版本的 GUI 文件，防止其中已被 GUI 删除的任务
+        借旧文件复活）。返回写回后的完整任务列表（含手写文件里的任务）。
         """
         validated = [self._build(item) for item in tasks]  # 任一非法抛 ValueError
         write_path = self._write_path()
         write_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._path.is_dir():
+            # 一次性迁移：清掉旧版 GUI 文件（只删确切文件名，不动用户其他文件）
+            (self._path / LEGACY_GUI_FILENAME).unlink(missing_ok=True)
         payload = [t.to_dict() for t in validated]
         write_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"

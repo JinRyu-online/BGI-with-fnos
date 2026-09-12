@@ -24,7 +24,8 @@ const error = ref('')
 const editing = ref(false) // 编辑弹层
 const saving = ref(false)
 const groupsText = ref('') // 组链编辑用逗号/换行分隔文本（fallback 模式）
-const form = reactive({
+// timeout_min 用 number | ''：'' 表示留空=不限（保存为 0，24h 强制兜底）
+const form = reactive<{ id: string; display_name: string; timeout_min: number | ''; after_done: string }>({
   id: '',
   display_name: '',
   timeout_min: 90,
@@ -98,7 +99,7 @@ function onTriggered(): void {
 
 function openNew(): void {
   editingId.value = ''
-  Object.assign(form, { display_name: '', timeout_min: 90, after_done: 'sleep' })
+  Object.assign(form, { display_name: '', timeout_min: '', after_done: 'sleep' })
   groupsText.value = ''
   selectedGroups.value = []
   editing.value = true
@@ -107,7 +108,8 @@ function openNew(): void {
 
 function openEdit(t: BgiTask): void {
   editingId.value = t.id
-  Object.assign(form, { display_name: t.display_name, timeout_min: t.timeout_min, after_done: t.after_done })
+  // timeout_min<=0（0=不限）显示为留空，明确"未设置任务级超时"
+  Object.assign(form, { display_name: t.display_name, timeout_min: t.timeout_min > 0 ? t.timeout_min : '', after_done: t.after_done })
   groupsText.value = t.groups.join('、')
   // 先打开弹层（picker/text 由接口返回决定），再预填勾选模型
   selectedGroups.value = []
@@ -138,7 +140,10 @@ async function save(): Promise<void> {
     id: isNew.value ? `gui-${Date.now()}` : editingId.value,
     display_name: form.display_name.trim(),
     groups,
-    timeout_min: Math.max(1, Math.min(1440, Math.floor(form.timeout_min) || 90)),
+    // 留空 = 不限（0，24h 强制兜底）；有值则钳制在 1-1440
+    timeout_min: (form.timeout_min === '' || form.timeout_min == null)
+      ? 0
+      : Math.max(1, Math.min(1440, Math.floor(form.timeout_min))),
     after_done: form.after_done,
   }
   const next = [...tasks.value.filter(t => t.id !== item.id), item]
@@ -289,8 +294,8 @@ function menuRemove(t: BgiTask): void {
                 </template>
               </div>
               <div class="field">
-                <label>超时上限（分钟，1-1440）</label>
-                <input v-model.number="form.timeout_min" type="number" min="1" max="1440">
+                <label>超时上限（分钟，1-1440；留空=不限，24 小时强制兜底）</label>
+                <input v-model.number="form.timeout_min" type="number" max="1440">
               </div>
               <div class="field">
                 <label>完成后动作</label>

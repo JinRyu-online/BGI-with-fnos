@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from bgi_trigger.api.app import create_app, AppDeps
 from bgi_trigger.service.auth import AuthState
 from bgi_trigger.core.state import JobStore
-from bgi_trigger.core.tasks import TaskRegistry
+from bgi_trigger.core.tasks import TaskRegistry, GUI_FILENAME
 
 AUTH = {"Authorization": "Bearer secret"}
 
@@ -42,18 +42,18 @@ def test_save_all_writes_file_and_hot_reloads(tmp_path):
     reg.save_all([
         {"id": "mining", "display_name": "挖矿一条龙", "groups": ["采矿"], "timeout_min": 60, "after_done": "shutdown"},
     ])
-    # 写回了 00_gui.json
-    gui_file = d / "00_gui.json"
+    # 写回了 99_gui.json（GUI_FILENAME，加载顺序上强制最后）
+    gui_file = d / GUI_FILENAME
     assert gui_file.exists()
     data = json.loads(gui_file.read_text(encoding="utf-8"))
     assert data[0]["id"] == "mining"
-    # 热加载生效：GUI 清单生效，且手写 daily.json 仍保留（目录模式只覆盖 00_gui.json）
+    # 热加载生效：GUI 清单生效，且手写 daily.json 仍保留（目录模式只覆盖 GUI 文件）
     ids = sorted(t.id for t in reg.all())
     assert ids == ["daily", "mining"]
 
 
 def test_save_all_directory_merges_handwritten(tmp_path):
-    """目录模式：手写文件保留；同 id 时手写文件覆盖 GUI 版本（后加载胜出）。"""
+    """目录模式：手写文件保留；同 id 时 GUI 版本（99_gui.json 最后加载）胜出。"""
     d = tmp_path / "tasks"
     d.mkdir()
     _write_task(d, _task(d))
@@ -63,9 +63,68 @@ def test_save_all_directory_merges_handwritten(tmp_path):
         {"id": "daily", "display_name": "GUI日常", "groups": ["x"], "timeout_min": 30, "after_done": "lock"},
     ])
     by_id = {t.id: t for t in reg.all()}
-    # 手写 daily.json 里的 daily 覆盖 GUI 版本
-    assert by_id["daily"].display_name == "日常一条龙"
+    # GUI 版本的 daily 覆盖手写 daily.json 里的 daily（GUI 文件强制最后加载）
+    assert by_id["daily"].display_name == "GUI日常"
+    assert by_id["daily"].timeout_min == 30
     assert by_id["mining"].display_name == "GUI挖矿"
+
+
+def test_gui_wins_over_filename_sorting_after_gui(tmp_path):
+    """回归：手写文件名排序在 GUI 文件之后（如 zz_daily.json）时 GUI 版本仍胜出。
+
+    对应真实 bug 形态：码点序中字母开头文件名排在数字开头（00_gui.json）
+    之后，旧实现靠文件名排序导致 GUI 编辑被同 id 手写文件完全遮蔽。"""
+    d = tmp_path / "tasks"
+    d.mkdir()
+    (d / "zz_daily.json").write_text(
+        json.dumps(_task(d), ensure_ascii=False), encoding="utf-8")
+    reg = TaskRegistry(d)
+    reg.save_all([
+        {"id": "daily", "display_name": "GUI日常", "groups": ["x"],
+         "timeout_min": 30, "after_done": "lock"},
+    ])
+    t = reg.get("daily")
+    assert t.display_name == "GUI日常"
+    assert t.timeout_min == 30
+    # 手写文件仍在磁盘上（GUI 只覆盖自己的文件）
+    assert (d / "zz_daily.json").exists()
+
+
+def test_save_all_deletes_legacy_00_gui(tmp_path):
+    """save_all 写回时删除遗留的旧 00_gui.json（一次性迁移，防旧任务复活）。"""
+    d = tmp_path / "tasks"
+    d.mkdir()
+    legacy = {"id": "old", "display_name": "旧GUI任务", "groups": ["g"],
+              "timeout_min": 60, "after_done": "sleep"}
+    (d / "00_gui.json").write_text(
+        json.dumps([legacy], ensure_ascii=False), encoding="utf-8")
+    reg = TaskRegistry(d)
+    assert "old" in {t.id for t in reg.all()}
+
+    reg.save_all([
+        {"id": "new", "display_name": "n", "groups": ["g"],
+         "timeout_min": 10, "after_done": "none"},
+    ])
+    assert not (d / "00_gui.json").exists()
+    assert (d / GUI_FILENAME).exists()
+    # 旧文件里的任务不再出现（防止已被 GUI 删除的任务借旧文件复活）
+    assert {t.id for t in reg.all()} == {"new"}
+
+
+def test_build_timeout_min_falsy_or_invalid_normalized_to_zero():
+    """_build 容错归一：None/负数/非法字符串 → 0（0 = 不限，24h 兜底）。
+
+    原实现 int(None) 抛 TypeError 而 _reload 只捕获 ValueError，会把整个
+    registry 构造炸掉。"""
+    build = TaskRegistry._build
+    assert build({"id": "t", "groups": ["g"], "timeout_min": 0}).timeout_min == 0
+    assert build({"id": "t", "groups": ["g"], "timeout_min": None}).timeout_min == 0
+    assert build({"id": "t", "groups": ["g"], "timeout_min": -5}).timeout_min == 0
+    assert build({"id": "t", "groups": ["g"], "timeout_min": "abc"}).timeout_min == 0
+    assert build({"id": "t", "groups": ["g"]}).timeout_min == 90  # 缺省不变
+    assert build({"id": "t", "groups": ["g"], "timeout_min": 45}).timeout_min == 45
+    # 负数字符串同样归一为 0 而不是抛错
+    assert build({"id": "t", "groups": ["g"], "timeout_min": "-3"}).timeout_min == 0
 
 
 def test_save_all_invalid_rejects_and_keeps_old(tmp_path):

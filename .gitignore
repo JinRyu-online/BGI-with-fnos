@@ -8,6 +8,9 @@ __pycache__/
 windows-listener/venv/
 windows-listener/config.toml
 windows-listener/tasks/tasks.json
+# GUI 任务编辑写回文件（运行时用户数据，勿提交）
+windows-listener/tasks/00_gui.json
+windows-listener/tasks/99_gui.json
 windows-listener/trusted.json
 windows-listener/.first_run_done
 windows-listener/var/

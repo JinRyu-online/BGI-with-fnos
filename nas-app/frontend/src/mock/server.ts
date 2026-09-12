@@ -33,6 +33,8 @@ const MOCK_TASKS: BgiTask[] = [
   { id: 't2', display_name: '快速委托', groups: ['日常一条龙', '每日委托'], timeout_min: 30, after_done: 'none' },
   { id: 't3', display_name: '无尽采矿', groups: ['日常一条龙', '采矿'], timeout_min: 120, after_done: 'sleep' },
   { id: 't4', display_name: '尘歌壶助力', groups: ['尘歌壶', '好友助力'], timeout_min: 20, after_done: 'lock' },
+  // 覆盖"不限"（timeout_min=0）的显示分支
+  { id: 't5', display_name: '挂机钓鱼', groups: ['钓鱼', '关闭游戏'], timeout_min: 0, after_done: 'none' },
 ]
 
 const LOG_SCRIPT = [

@@ -255,7 +255,7 @@ export const TERMINAL_STATES = Object.keys(JOB_STATE_MAP).filter(k => JOB_STATE_
 
 - 内容：显示名（17px/700）+ 右侧触发按钮；第二行分组链 pill（`日常一条龙 → 关闭游戏`，末段高亮蓝）；第三行属性 pill（`⏱ 90 分钟` 蓝、收尾动作 `💤 休眠` 绿）。
 - 分组链 pill：普通段灰底、末段 `--info-weak` 蓝底加粗，箭头 `--text-3`。
-- 属性 pill 数据来自任务配置：`timeout_min` 分钟、`after_done ∈ {sleep, shutdown, lock, none}` 对应 `💤 休眠 / ⏻ 关机 / 🔒 锁屏 / ⏸ 不操作`。
+- 属性 pill 数据来自任务配置：`timeout_min` 分钟（0 = 显示「不限」，24h 强制兜底）、`after_done ∈ {sleep, shutdown, lock, none}` 对应 `💤 休眠 / ⏻ 关机 / 🔒 锁屏 / ⏸ 不操作`。
 
 ### 4.4 TriggerButton（触发按钮，三态）
 
