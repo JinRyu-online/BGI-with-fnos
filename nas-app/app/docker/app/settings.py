@@ -26,8 +26,8 @@ DEFAULT_CONFIG: dict = {
     "target_mac": "",        # 目标机器 MAC 地址（Wake-on-LAN 唤醒用；空=未配置）
     "scan": {
         "subnet": None,            # null=自动从网卡探测子网；填则覆盖
-        "listener_port": 8765,     # 监听器默认端口，扫描时探测此端口
-        "diag_ports": [22, 3389, 445, 8765, "8000-8100"],  # 端口诊断扫描列表
+        "listener_port": 18765,    # 监听器默认端口，扫描时探测此端口（避开 Hyper-V 排除段）
+        "diag_ports": [22, 3389, 445, 18765, "8000-8100"],  # 端口诊断扫描列表
     },
     "poll": {
         "interval_sec": 10,        # 触发后轮询 /status 的间隔

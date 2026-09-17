@@ -8,7 +8,7 @@
  飞牛 fnOS NAS                           Windows 11 PC
 ┌──────────────────┐   HTTP/WS     ┌──────────────────────────┐
 │   nas-app (FPK)  │ ◄──────────► │   windows-listener       │
-│   FastAPI 单页   │   8765 端口   │   FastAPI + uvicorn      │
+│   FastAPI 单页   │  18765 端口   │   FastAPI + uvicorn      │
 │  扫描 / 配对 /   │              │   拉起 BetterGI.exe      │
 │  触发 / 状态回报 │              │   完成判定 + WS 实时日志  │
 └──────────────────┘              └──────────────────────────┘

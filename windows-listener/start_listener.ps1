@@ -5,13 +5,13 @@
 .DESCRIPTION
     仅启动 listener.py 并等待服务就绪，不发送任何触发请求。
     服务启动后窗保持打开，关闭窗口即停止服务。
-    若 listener 已在运行（端口 8765 被 python 占用），则跳过启动直接提示。
+    若 listener 已在运行（端口 18765 被 python 占用），则跳过启动直接提示。
 #>
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$PORT = 8765
+$PORT = 18765
 
 # 检查 listener 是否在运行：端口被 python 进程占用即视为已运行
 function Test-ListenerRunning {

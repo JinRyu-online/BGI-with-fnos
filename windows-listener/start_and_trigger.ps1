@@ -10,7 +10,7 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$PORT = 8765
+$PORT = 18765
 $BASE_URL = "http://127.0.0.1:$PORT"
 
 # 检查 listener 是否在运行：端口被 python 进程占用即视为已运行

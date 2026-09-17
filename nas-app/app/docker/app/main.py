@@ -763,7 +763,7 @@ def create_app(
         return snap
 
     @app.get("/api/discover-key")
-    def api_discover_key(ip: str, port: int = 8765) -> dict:
+    def api_discover_key(ip: str, port: int = 18765) -> dict:
         """服务端代理获取目标监听器的 /key。
 
         前端处于 HTTPS 时浏览器会拦截对 http://IP:port 的 mixed content 请求，

@@ -130,7 +130,7 @@ def scan_subnet_parallel(
 
 
 def auto_discover_and_scan(
-    port: int = 8765,
+    port: int = 18765,
     subnet: str | None = None,
     common_fallback: bool = True,
     stop_on_first_hit: bool = True,

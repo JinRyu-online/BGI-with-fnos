@@ -23,7 +23,7 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const MOCK_CONFIG: AppConfig = {
   default_target: { ip: '192.168.31.43', port: 8766, hostname: 'DESKTOP-GAMING' },
   api_key: 'mock-api-key-xxxxxxxxxxxx',
-  scan: { subnet: null, listener_port: 8766, diag_ports: [8765, 8766] },
+  scan: { subnet: null, listener_port: 18765, diag_ports: [18765, 8766] },
   poll: { interval_sec: 2 },
   target_mac: 'AA-BB-CC-DD-EE-FF',
 }

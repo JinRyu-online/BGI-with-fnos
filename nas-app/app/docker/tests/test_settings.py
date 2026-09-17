@@ -11,7 +11,7 @@ def test_load_returns_defaults_when_no_file(tmp_path):
 
     assert cfg["default_target"] is None
     assert cfg["api_key"] == ""
-    assert cfg["scan"]["listener_port"] == 8765
+    assert cfg["scan"]["listener_port"] == 18765
     assert cfg["poll"]["interval_sec"] == 10
 
 
@@ -37,7 +37,7 @@ def test_load_merges_partial_file_with_defaults(tmp_path):
 
     assert cfg["api_key"] == "k"
     # missing sections still get defaults
-    assert cfg["scan"]["listener_port"] == 8765
+    assert cfg["scan"]["listener_port"] == 18765
     assert cfg["poll"]["interval_sec"] == 10
 
 

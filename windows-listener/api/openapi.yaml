@@ -12,9 +12,9 @@ info:
     api_key 在监听器首次启动时自动生成（弹窗显示），也可在 `config.toml` 手填。
     来源 IP 首次以正确密钥访问时自动加入信任列表。
 servers:
-  - url: http://127.0.0.1:8765
+  - url: http://127.0.0.1:18765
     description: 本机访问
-  - url: http://{windows_ip}:8765
+  - url: http://{windows_ip}:18765
     description: 局域网访问（替换为 Windows 实际 IP）
     variables:
       windows_ip:

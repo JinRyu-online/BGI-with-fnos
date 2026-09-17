@@ -23,7 +23,7 @@ log = logging.getLogger("bgi_trigger.config")
 # 默认配置：当 config.toml 中某字段缺失时，用此处的值兜底。
 # 修改默认值需同步更新 config.toml.example，保持一致。
 DEFAULTS: dict = {
-    "server": {"host": "0.0.0.0", "port": 8765},
+    "server": {"host": "0.0.0.0", "port": 18765},
     "auth": {"api_key": "", "trusted_ips": []},
     "bettergi": {
         "dir": "",               # BetterGI 安装根目录（空=使用下方显式字段）。
