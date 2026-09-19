@@ -1,4 +1,4 @@
-"""Wake-on-LAN 魔术包单元测试与 /api/wol 路由测试。"""
+﻿"""Wake-on-LAN 魔术包单元测试与 /api/wol 路由测试。"""
 import socket
 import json
 from unittest import mock
@@ -194,7 +194,7 @@ def test_wol_route_502_does_not_persist(tmp_path):
 def test_wol_route_save_preserves_schedules_and_default_target(tmp_path):
     """⑤ 保存 MAC 不丢同文件内的 schedules / default_target（update 原子更新语义）。"""
     cfg = {
-        "default_target": {"ip": "192.168.1.50", "port": 8765, "hostname": "win"},
+        "default_target": {"ip": "192.168.1.50", "port": 18765, "hostname": "win"},
         "api_key": "k",
         "target_mac": "",
         "schedules": [{"id": "s1", "enabled": True, "name": "晨间挖矿", "time": "07:30",

@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
  * Mock 后端：模仿 docs/原型/bgi-prototype.html 的模拟流转
  *   触发 → triggering → running（日志逐行流入）→ completing → done
  *   running/completing 可中止为 aborted
@@ -6,7 +6,7 @@
  * ============================================================ */
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
-  ScanProgress, DeviceInfo, DiscoverKeyAck, AbortAck, StopAck, WolAck,
+  ScanProgress, ProbeAck, DeviceInfo, DiscoverKeyAck, AbortAck, StopAck, WolAck,
   ScheduleItem, LogBundle,
 } from '../types'
 
@@ -303,6 +303,15 @@ export const mockApi = {
   async startScan(): Promise<{ started: boolean; reason?: string }> {
     await sleep(150)
     return { started: true }
+  },
+
+  async probe(ip: string, port?: number): Promise<ProbeAck> {
+    await sleep(250)
+    if (!ip) throw new MockHttpError(400, 'missing ip')
+    if (ip === '192.168.31.43') {
+      return { found: true, device: { ip, port: port ?? 18765, hostname: 'DESKTOP-GAMING', version: 'v1.2.0' } }
+    }
+    return { found: false, reason: '无法连接该地址:端口' }
   },
 
   async scanProgress(): Promise<ScanProgress> {

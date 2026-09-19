@@ -1,4 +1,4 @@
-import json
+﻿import json
 
 from settings import Settings, DEFAULT_CONFIG
 
@@ -21,7 +21,7 @@ def test_save_then_load_round_trip(tmp_path):
 
     cfg = s.load()
     cfg["api_key"] = "secret"
-    cfg["default_target"] = {"ip": "192.168.1.100", "port": 8765, "hostname": "DESKTOP-X"}
+    cfg["default_target"] = {"ip": "192.168.1.100", "port": 18765, "hostname": "DESKTOP-X"}
     s.save(cfg)
 
     reloaded = Settings(path).load()

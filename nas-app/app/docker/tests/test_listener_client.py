@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 from listener_client import ListenerClient, ListenerError, ListenerAuthError, ListenerNotFound, TERMINAL_STATES
 
@@ -31,7 +31,7 @@ class _FakeTransport:
 
 
 def _client(transport):
-    return ListenerClient("http://192.168.1.100:8765", api_key="secret", request=transport)
+    return ListenerClient("http://192.168.1.100:18765", api_key="secret", request=transport)
 
 
 def test_health_returns_signature():
@@ -89,7 +89,7 @@ def test_busy_409_raises_listener_error():
 def test_network_error_raises_listener_error():
     def boom(method, url, headers=None, json=None, timeout=None):
         raise OSError("connection refused")
-    c = ListenerClient("http://1.2.3.4:8765", "k", request=boom)
+    c = ListenerClient("http://1.2.3.4:18765", "k", request=boom)
 
     with pytest.raises(ListenerError):
         c.tasks()

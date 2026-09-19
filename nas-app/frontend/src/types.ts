@@ -50,6 +50,12 @@ export interface ScanAck {
   subnet?: string
 }
 
+export interface ProbeAck {
+  found: boolean
+  device?: DeviceInfo
+  reason?: string
+}
+
 export interface SubnetProgress {
   subnet: string
   status: 'pending' | 'scanning' | 'scanning…' | 'done' | 'skipped' | 'skipping' | string

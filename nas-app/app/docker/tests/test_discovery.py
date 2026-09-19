@@ -1,4 +1,4 @@
-from discovery import list_local_subnets, scan_subnet, scan_subnet_parallel
+﻿from discovery import list_local_subnets, probe_host, scan_subnet, scan_subnet_parallel
 
 
 def test_list_local_subnets_from_interfaces():
@@ -29,11 +29,11 @@ def test_scan_subnet_finds_matching_listener():
             return {"service": "bgi-trigger", "hostname": "DESKTOP-A", "version": "1.0.0"}
         return None
 
-    devices = scan_subnet("192.168.1.0/30", 8765, probe=probe, http_get=http_get)
+    devices = scan_subnet("192.168.1.0/30", 18765, probe=probe, http_get=http_get)
 
     assert len(devices) == 1
     assert devices[0]["ip"] == "192.168.1.2"
-    assert devices[0]["port"] == 8765
+    assert devices[0]["port"] == 18765
     assert devices[0]["hostname"] == "DESKTOP-A"
 
 
@@ -44,7 +44,7 @@ def test_scan_subnet_ignores_non_matching_service():
     def http_get(ip, port):
         return {"service": "something-else", "hostname": "x"}  # 不是我们的服务
 
-    devices = scan_subnet("192.168.1.0/30", 8765, probe=probe, http_get=http_get)
+    devices = scan_subnet("192.168.1.0/30", 18765, probe=probe, http_get=http_get)
     assert devices == []
 
 
@@ -55,7 +55,7 @@ def test_scan_subnet_skips_closed_ports():
     def http_get(ip, port):
         raise AssertionError("不应在端口关闭时调用 http_get")
 
-    devices = scan_subnet("192.168.1.0/30", 8765, probe=probe, http_get=http_get)
+    devices = scan_subnet("192.168.1.0/30", 18765, probe=probe, http_get=http_get)
     assert devices == []
 
 
@@ -66,7 +66,48 @@ def test_scan_subnet_parallel_finds_matching_listener():
     def http_get(ip, port):
         return {"service": "bgi-trigger", "hostname": "DESKTOP-A", "version": "1.0.0"}
 
-    devices = scan_subnet_parallel("192.168.1.0/30", 8765, probe=probe, http_get=http_get)
+    devices = scan_subnet_parallel("192.168.1.0/30", 18765, probe=probe, http_get=http_get)
     assert len(devices) == 1
     assert devices[0]["ip"] == "192.168.1.2"
     assert devices[0]["hostname"] == "DESKTOP-A"
+
+
+def test_probe_host_hit_returns_device():
+    def probe(ip, port):
+        return True
+
+    def http_get(ip, port):
+        return {"service": "bgi-trigger", "hostname": "DESKTOP-A", "version": "1.0.0"}
+
+    result = probe_host("192.168.1.2", 18765, probe=probe, http_get=http_get)
+    assert result["ok"] is True
+    assert result["device"] == {
+        "ip": "192.168.1.2",
+        "port": 18765,
+        "hostname": "DESKTOP-A",
+        "version": "1.0.0",
+    }
+
+
+def test_probe_host_service_mismatch_not_listener():
+    def probe(ip, port):
+        return True
+
+    def http_get(ip, port):
+        return {"service": "something-else", "hostname": "x"}
+
+    result = probe_host("192.168.1.2", 18765, probe=probe, http_get=http_get)
+    assert result["ok"] is False
+    assert result["reason"] == "not_listener"
+
+
+def test_probe_host_closed_port_skips_http_get():
+    def probe(ip, port):
+        return False
+
+    def http_get(ip, port):
+        raise AssertionError("端口关闭时不应调用 http_get")
+
+    result = probe_host("192.168.1.2", 18765, probe=probe, http_get=http_get)
+    assert result["ok"] is False
+    assert result["reason"] == "connect_failed"

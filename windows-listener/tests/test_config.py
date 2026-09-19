@@ -1,4 +1,4 @@
-import tomllib
+﻿import tomllib
 from pathlib import Path
 
 from bgi_trigger.service.config import ListenerConfig
@@ -44,7 +44,7 @@ def test_load_applies_defaults_for_missing_fields(tmp_path):
 
 def test_first_run_generates_and_persists_api_key(tmp_path):
     cfg_path = tmp_path / "config.toml"
-    write_toml(cfg_path, {"server": {"host": "0.0.0.0", "port": 8765}})
+    write_toml(cfg_path, {"server": {"host": "0.0.0.0", "port": 18765}})
 
     config = ListenerConfig.load(cfg_path)
 
@@ -68,7 +68,7 @@ def test_first_run_preserves_existing_comments(tmp_path):
         "# 我的配置\n"
         "[server]\n"
         "host = \"0.0.0.0\"\n"
-        "port = 8765\n"
+        "port = 18765\n"
         "\n"
         "[auth]\n"
         "# 密钥留空则自动生成\n"
@@ -105,7 +105,7 @@ def test_pre_launch_script_loaded_when_configured(tmp_path):
     """[execution] pre_launch_script 显式配置 → 加载进 Execution dataclass。"""
     cfg_path = tmp_path / "config.toml"
     write_toml(cfg_path, {
-        "server": {"host": "0.0.0.0", "port": 8765},
+        "server": {"host": "0.0.0.0", "port": 18765},
         "execution": {
             "pre_launch_script": "taskkill /IM Weixin.exe /F & taskkill /IM QQ.exe /F",
         },

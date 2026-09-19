@@ -129,6 +129,42 @@ def scan_subnet_parallel(
     return out
 
 
+def probe_host(
+    ip: str,
+    port: int,
+    probe: Callable[[str, int], bool],
+    http_get: Callable[[str, int], dict | None],
+) -> dict:
+    """探测单个 IP:port，返回结构化结果（始终是 dict，便于 API 层映射文案）。
+
+    成功：{"ok": True, "device": {"ip", "port", "hostname", "version"}}
+    失败：{"ok": False, "reason": "connect_failed"|"not_listener"|"error", "detail": str}
+      - connect_failed：TCP 探活失败（端口关/主机不可达）
+      - not_listener：TCP 通，但 /health 非 bgi-trigger / 非 JSON / 请求异常
+      - error：未预期异常（防御分支）
+    """
+    try:
+        if not probe(ip, port):
+            return {"ok": False, "reason": "connect_failed", "detail": ""}
+        try:
+            health = http_get(ip, port)
+        except Exception as e:
+            return {"ok": False, "reason": "not_listener", "detail": str(e)}
+        if health and health.get("service") == "bgi-trigger":
+            return {
+                "ok": True,
+                "device": {
+                    "ip": ip,
+                    "port": port,
+                    "hostname": health.get("hostname", ""),
+                    "version": health.get("version", ""),
+                },
+            }
+        return {"ok": False, "reason": "not_listener", "detail": ""}
+    except Exception as e:
+        return {"ok": False, "reason": "error", "detail": str(e)}
+
+
 def auto_discover_and_scan(
     port: int = 18765,
     subnet: str | None = None,

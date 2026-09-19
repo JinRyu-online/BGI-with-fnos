@@ -1,4 +1,4 @@
-from fastapi.testclient import TestClient
+﻿from fastapi.testclient import TestClient
 
 from main import create_app
 
@@ -27,7 +27,7 @@ def test_config_endpoint_returns_paired_target(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "192.168.1.100", "port": 8765, "hostname": "DESKTOP-X"}
+    cfg["default_target"] = {"ip": "192.168.1.100", "port": 18765, "hostname": "DESKTOP-X"}
     cfg["api_key"] = "secret"
     s.save(cfg)
 

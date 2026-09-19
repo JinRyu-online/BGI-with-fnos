@@ -1,6 +1,6 @@
 # BetterGI Trigger — 飞牛 fnOS FPK 应用
 
-NAS 端应用：扫描局域网内的 Windows 监听器、配对、触发 BetterGI 任务、回报状态。
+NAS 端应用：扫描局域网内的 Windows 监听器（或按指定 IP:端口探测）、配对、触发 BetterGI 任务、回报状态。
 
 ## 打包
 
@@ -36,7 +36,7 @@ nas-app/
 │       └── app/             FastAPI 源码
 │           ├── main.py          入口（页面 + 全部 /api 路由）
 │           ├── settings.py      配置持久化（config.json，BGI_DATA_DIR）
-│           ├── discovery.py     psutil 子网发现 + 并行 LAN 扫描
+│           ├── discovery.py     psutil 子网发现 + 并行 LAN 扫描 + probe_host 单点探测
 │           ├── listener_client.py  Windows 监听器 HTTP 客户端
 │           ├── history.py       任务历史持久化
 │           ├── requirements.txt
@@ -55,7 +55,7 @@ nas-app/
 ## 范围
 
 - **M2** 骨架：配置持久化 + 首页 + /health + 打包文件 ✅
-- **M3** 设备扫描配对：子网探测 + /health/`/key` 识别 + 密钥配对 ✅
+- **M3** 设备扫描配对：子网探测 + /health/`/key` 识别 + 密钥配对 + 指定 IP:端口 探测（`POST /api/probe`） ✅
 - **M4** 触发回报：/trigger + 10s 轮询 /status + 历史 + WS 实时日志（**MVP 完成**） ✅
 
 > v0.2.0：M1–M4 端到端真机跑通。

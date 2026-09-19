@@ -1,6 +1,6 @@
 # AGENTS.md
 
-面向 AI 代理/编码协作的代码库指南。项目已有面向人的文档（[README.md](README.md)、[CLAUDE.md](CLAUDE.md)、[docs/开发方案.md](docs/开发方案.md)），本文件聚焦"改代码前必须知道的约定与陷阱"。
+面向 AI 代理/编码协作的代码库指南。项目已有面向人的文档（[README.md](README.md)、[docs/开发方案.md](docs/开发方案.md)）；`CLAUDE.md` 为本文件的软链接（勿另维护），本文件聚焦"改代码前必须知道的约定与陷阱"。
 
 ## 项目概览
 
@@ -61,8 +61,10 @@ bgi_trigger/
 `nas-app/app/docker/app/` 下模块**扁平 import**（`from settings import ...`，与容器 WORKDIR=/app 一致；`conftest.py` 把 app/ 加进 sys.path 来兼容此约定）：
 
 ```
-main.py             create_app 工厂（scanner/client_factory/history_path 均可注入）
-discovery.py        网卡枚举 → CIDR → 并行 TCP 探活 + /health 识别（service=="bgi-trigger"）
+main.py             create_app 工厂（scanner/client_factory/history_path/host_prober 等均可注入）
+discovery.py        网卡枚举 → CIDR → 并行 TCP 探活 + /health 识别（service=="bgi-trigger"）；
+                    另有 probe_host(ip, port)：单点探测，返回结构化 ok/device 或 ok=False+reason
+                    （connect_failed|not_listener|error），供 NAS 内部端点 POST /api/probe 使用
 listener_client.py  ListenerClient：Windows 端 typed 客户端（ListenerAuthError/ListenerError）
 history.py          HistoryStore：jobs.json 按 job_id 去重更新、截断 50 条
 scheduler.py        定时任务：next_fire_at/is_due 纯函数 + ScheduleStateStore + Scheduler.tick
@@ -115,7 +117,7 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 
 4. **`config.py` 用手写 TOML 序列化器**（`_dump_toml`/`_toml_value`）：只支持扁平分节（`[section]\nkey = value`），不支持嵌套表。新增嵌套配置需先扩展序列化器。读取用内置 `tomllib`。默认值改动需同步 `config.toml.example`。
 
-5. **依赖注入是硬约定**：两端 `create_app` 一律通过参数/AppDeps 注入依赖（auth/jobs/launch/scanner/client_factory/history_path），**绝不在 app.py 内部构造**。测试靠塞 fake（如 `launch=lambda job, task: None`）。
+5. **依赖注入是硬约定**：两端 `create_app` 一律通过参数/AppDeps 注入依赖（auth/jobs/launch/scanner/client_factory/history_path/host_prober），**绝不在 app.py 内部构造**。测试靠塞 fake（如 `launch=lambda job, task: None`）。NAS 的 `POST /api/probe`（设置页「指定 IP:端口」快速匹配）必须走 `host_prober` 注入，禁止在路由内写死网络探测。
 
 6. **`/trigger` 只接受白名单 task_id**，永远不接受原始命令行。任务定义在 `tasks/*.json`（可数组可单对象；`*.example` 不加载；坏文件跳过并告警，不拖垮整个 registry）。`groups` 必须与 BetterGI「全自动-调度器」UI 组名逐字一致——BetterGI 命令行只能跑调度器组（`--startGroups`），不能直接跑单个 JS 脚本。
 
@@ -161,4 +163,4 @@ idle ──POST /trigger──▶ running ──B/C 命中──▶ completing(g
 | `windows-listener/api/openapi.yaml` | 监听器 8 端点协议契约 |
 | `windows-listener/README.md` / `nas-app/README.md` / `nas-app/打包说明.md` | 两端部署与打包细节 |
 | `docs/测试步骤.md` / `docs/测试注意事项.md` | 联调流程与避坑 |
-| `CLAUDE.md` | Claude Code 版指南（与本文内容相近） |
+| `CLAUDE.md` | **软链接 → `AGENTS.md`**（勿另维护内容；改 AGENTS.md 即可） |

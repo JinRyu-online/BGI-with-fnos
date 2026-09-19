@@ -1,4 +1,4 @@
-import json
+﻿import json
 import time
 from pathlib import Path
 
@@ -52,7 +52,7 @@ class FakeClient:
         return {"stopped": True, "killed": ["BetterGI.exe"]}
 
 
-def _make(tmp_path, *, scanner=None, client=None):
+def _make(tmp_path, *, scanner=None, client=None, host_prober=None):
     """构造测试 app。client 为 FakeClient 实例，作为 client_factory 的返回。"""
     fake = client or FakeClient()
     return create_app(
@@ -60,12 +60,13 @@ def _make(tmp_path, *, scanner=None, client=None):
         history_path=str(tmp_path / "jobs.json"),
         scanner=scanner or (lambda subnet, port: []),
         client_factory=lambda url, key: fake,
+        host_prober=host_prober,
     )
 
 
 def test_scan_returns_devices_sync(tmp_path):
     """同步模式：POST /api/scan {"sync":true} 直接返回设备。"""
-    devices = [{"ip": "192.168.1.10", "port": 8765, "hostname": "DESKTOP-A", "version": "1"}]
+    devices = [{"ip": "192.168.1.10", "port": 18765, "hostname": "DESKTOP-A", "version": "1"}]
     client = TestClient(_make(tmp_path, scanner=lambda subnet, port: devices))
 
     r = client.post("/api/scan", json={"sync": True})
@@ -77,7 +78,7 @@ def test_scan_returns_devices_sync(tmp_path):
 
 def test_scan_async_started(tmp_path):
     """异步模式：POST /api/scan 启动后台任务，返回 {"started": True}。"""
-    devices = [{"ip": "192.168.1.10", "port": 8765, "hostname": "A", "version": "1"}]
+    devices = [{"ip": "192.168.1.10", "port": 18765, "hostname": "A", "version": "1"}]
 
     def fake_scanner(subnet, port, progress_cb=None):
         if progress_cb:
@@ -105,7 +106,7 @@ def test_scan_async_started(tmp_path):
 def test_pair_saves_target_and_key(tmp_path):
     client = TestClient(_make(tmp_path, client=FakeClient()))
     r = client.post("/api/pair", json={
-        "ip": "192.168.1.10", "port": 8765, "hostname": "DESKTOP-A", "api_key": "secret"
+        "ip": "192.168.1.10", "port": 18765, "hostname": "DESKTOP-A", "api_key": "secret"
     })
 
     assert r.status_code == 200
@@ -118,7 +119,7 @@ def test_pair_saves_target_and_key(tmp_path):
 def test_pair_with_bad_key_returns_401(tmp_path):
     client = TestClient(_make(tmp_path, client=FakeClient(raise_auth=True)))
     r = client.post("/api/pair", json={
-        "ip": "192.168.1.10", "port": 8765, "hostname": "X", "api_key": "wrong"
+        "ip": "192.168.1.10", "port": 18765, "hostname": "X", "api_key": "wrong"
     })
     assert r.status_code == 401
 
@@ -134,7 +135,7 @@ def test_bgi_groups_returns_list(tmp_path):
     fake = FakeClient()
     fake.bgi_groups = lambda: ["日常一条龙", "挖矿", "关闭游戏"]
     client = TestClient(_make(tmp_path, client=fake))
-    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = client.get("/api/bgi-groups")
     assert r.status_code == 200
@@ -158,7 +159,7 @@ def test_bgi_groups_old_listener_404_returns_empty(tmp_path):
 
     fake.bgi_groups = _raise_404
     client = TestClient(_make(tmp_path, client=fake))
-    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    client.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = client.get("/api/bgi-groups")
     assert r.status_code == 200
@@ -168,7 +169,7 @@ def test_bgi_groups_old_listener_404_returns_empty(tmp_path):
 def test_tasks_after_pair_returns_list(tmp_path):
     app = _make(tmp_path, client=FakeClient(tasks_data=[{"id": "daily", "display_name": "日常", "groups": ["g"], "timeout_min": 90, "after_done": "sleep"}]))
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = c.get("/api/tasks")
     assert r.status_code == 200
@@ -178,7 +179,7 @@ def test_tasks_after_pair_returns_list(tmp_path):
 def test_trigger_returns_job_id_and_records_history(tmp_path):
     app = _make(tmp_path, client=FakeClient(job_id="job42", status_state="running"))
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = c.post("/api/trigger", json={"task_id": "daily"})
     assert r.status_code == 202
@@ -192,7 +193,7 @@ def test_trigger_returns_job_id_and_records_history(tmp_path):
 def test_status_proxies_and_updates_history(tmp_path):
     app = _make(tmp_path, client=FakeClient(job_id="job42", status_state="done"))
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
     c.post("/api/trigger", json={"task_id": "daily"})
 
     r = c.get("/api/status", params={"job_id": "job42"})
@@ -207,7 +208,7 @@ def test_status_proxies_and_updates_history(tmp_path):
 def test_trigger_network_error_returns_502(tmp_path):
     app = _make(tmp_path, client=FakeClient(trigger_error=True))
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = c.post("/api/trigger", json={"task_id": "daily"})
     assert r.status_code == 502
@@ -218,7 +219,7 @@ def test_abort_forwards_to_listener(tmp_path):
     fake = FakeClient(status_state="completing")
     app = _make(tmp_path, client=fake)
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = c.post("/api/abort")
     assert r.status_code == 200
@@ -238,7 +239,7 @@ def test_stop_forwards_to_listener(tmp_path):
     fake = FakeClient()
     app = _make(tmp_path, client=fake)
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
 
     r = c.post("/api/stop")
     assert r.status_code == 200
@@ -263,7 +264,7 @@ def test_stop_auth_error_returns_401(tmp_path):
 
     app = _make(tmp_path, client=AuthFailClient())
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
     r = c.post("/api/stop")
     assert r.status_code == 401
 
@@ -278,7 +279,7 @@ def test_stop_listener_error_returns_502(tmp_path):
 
     app = _make(tmp_path, client=DownClient())
     c = TestClient(app)
-    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 8765, "hostname": "H", "api_key": "k"})
+    c.post("/api/pair", json={"ip": "1.1.1.1", "port": 18765, "hostname": "H", "api_key": "k"})
     r = c.post("/api/stop")
     assert r.status_code == 502
 
@@ -288,12 +289,12 @@ def test_discover_key_returns_api_key(tmp_path, monkeypatch):
     import main as main_mod
 
     def fake_http_get_json(ip, port, path="/", timeout=3.0):
-        assert (ip, port, path) == ("192.168.31.43", 8765, "/key")
+        assert (ip, port, path) == ("192.168.31.43", 18765, "/key")
         return {"api_key": "abc", "hostname": "H"}
 
     monkeypatch.setattr(main_mod, "_http_get_json", fake_http_get_json)
     c = TestClient(_make(tmp_path))
-    r = c.get("/api/discover-key", params={"ip": "192.168.31.43", "port": 8765})
+    r = c.get("/api/discover-key", params={"ip": "192.168.31.43", "port": 18765})
     assert r.status_code == 200
     assert r.json()["api_key"] == "abc"
     assert r.json()["hostname"] == "H"
@@ -315,7 +316,7 @@ def test_scan_with_explicit_subnet_skips_fallback(tmp_path):
         return [{"ip": "1.2.3.4", "port": port, "hostname": "X", "version": "1"}]
 
     c = TestClient(_make(tmp_path, scanner=tracking_scanner))
-    r = c.post("/api/scan", json={"subnet": "1.2.3.0/24", "port": 8765, "sync": True})
+    r = c.post("/api/scan", json={"subnet": "1.2.3.0/24", "port": 18765, "sync": True})
 
     assert r.status_code == 200
     assert calls == ["1.2.3.0/24"]  # 显式 → 只搜这一网,无 fallback
@@ -344,7 +345,7 @@ def test_tasks_replace_proxy(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     s.save(cfg)
 
@@ -367,3 +368,99 @@ def test_tasks_replace_unpaired(tmp_path):
     client = TestClient(app)
     r = client.put("/api/tasks", json={"tasks": []})
     assert r.status_code == 400
+
+
+def test_probe_success_returns_device(tmp_path):
+    device = {"ip": "192.168.31.43", "port": 8766, "hostname": "DESKTOP-GAMING", "version": "1.2.0"}
+    calls = []
+
+    def fake_prober(ip, port):
+        calls.append((ip, port))
+        return {"ok": True, "device": device}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "192.168.31.43", "port": 8766})
+    assert r.status_code == 200
+    assert r.json() == {"found": True, "device": device}
+    assert calls == [("192.168.31.43", 8766)]
+
+
+def test_probe_connect_failed_reason_text(tmp_path):
+    def fake_prober(ip, port):
+        return {"ok": False, "reason": "connect_failed", "detail": ""}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "10.0.0.9", "port": 18765})
+    assert r.status_code == 200
+    assert r.json() == {"found": False, "reason": "无法连接该地址:端口"}
+
+
+def test_probe_not_listener_reason_text(tmp_path):
+    def fake_prober(ip, port):
+        return {"ok": False, "reason": "not_listener", "detail": "wrong service"}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "10.0.0.9", "port": 18765})
+    assert r.status_code == 200
+    assert r.json() == {"found": False, "reason": "该地址未识别为 BetterGI 监听器"}
+
+
+def test_probe_invalid_ip_400(tmp_path):
+    def fake_prober(ip, port):
+        return {"ok": True, "device": {}}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "not-an-ip", "port": 18765})
+    assert r.status_code == 400
+
+
+def test_probe_port_zero_400_and_prober_not_called(tmp_path):
+    called = []
+
+    def fake_prober(ip, port):
+        called.append((ip, port))
+        return {"ok": True, "device": {}}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "192.168.1.2", "port": 0})
+    assert r.status_code == 400
+    assert "端口" in r.json()["detail"]
+    assert called == []
+
+
+def test_probe_port_out_of_range_400(tmp_path):
+    def fake_prober(ip, port):
+        return {"ok": True, "device": {}}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "192.168.1.2", "port": 70000})
+    assert r.status_code == 400
+
+
+def test_probe_omitted_port_uses_listener_port_default(tmp_path):
+    calls = []
+
+    def fake_prober(ip, port):
+        calls.append((ip, port))
+        return {"ok": False, "reason": "connect_failed", "detail": ""}
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "192.168.31.43"})
+    assert r.status_code == 200
+    assert calls == [("192.168.31.43", 18765)]
+
+
+def test_probe_explicit_port_overrides_default(tmp_path):
+    calls = []
+
+    def fake_prober(ip, port):
+        calls.append((ip, port))
+        return {
+            "ok": True,
+            "device": {"ip": ip, "port": port, "hostname": "H", "version": "1"},
+        }
+
+    c = TestClient(_make(tmp_path, host_prober=fake_prober))
+    r = c.post("/api/probe", json={"ip": "192.168.31.43", "port": 8766})
+    assert r.status_code == 200
+    assert calls == [("192.168.31.43", 8766)]

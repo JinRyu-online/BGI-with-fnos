@@ -8,7 +8,7 @@ import { mockEnabled } from '../mock/flag'
 import { MockHttpError, mockApi } from '../mock/server'
 import type {
   AppConfig, BgiTask, TriggerAck, JobStatus, JobRecord,
-  ScanAck, ScanProgress, DeviceInfo, DiscoverKeyAck,
+  ScanAck, ProbeAck, ScanProgress, DeviceInfo, DiscoverKeyAck,
   AbortAck, StopAck, WolAck, ScheduleItem, LogBundle,
 } from '../types'
 
@@ -63,6 +63,11 @@ export const api = {
   startScan(subnet?: string): Promise<ScanAck> {
     if (mockEnabled) return mockApi.startScan()
     return request<ScanAck>('POST', '/api/scan', subnet ? { subnet } : {})
+  },
+
+  probe(ip: string, port?: number): Promise<ProbeAck> {
+    if (mockEnabled) return mockApi.probe(ip, port)
+    return request<ProbeAck>('POST', '/api/probe', port === undefined ? { ip } : { ip, port })
   },
 
   scanProgress(): Promise<ScanProgress> {

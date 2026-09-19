@@ -32,7 +32,7 @@ const subText = computed(() => {
 interface SubnetRow { subnet: string; status: string; found: number }
 
 const scanning = ref(false)
-const pairingIp = ref('') // 正在配对的设备 ip（按钮 spinner）
+const pairingDevice = ref('') // 正在配对的设备 `${ip}:${port}`（按钮 spinner）
 const scan = reactive({
   show: false,
   percent: 0,
@@ -42,6 +42,41 @@ const scan = reactive({
   errorMsg: '',
 })
 const scanVersion = ref('')
+
+const probeInput = ref('')
+const probing = ref(false)
+const defaultListenerPort = computed(() => configState.config?.scan?.listener_port ?? 18765)
+
+function isIPv4(ip: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip)
+  if (!m) return false
+  return m.slice(1).every(p => {
+    if (p.length > 1 && p.startsWith('0')) return false
+    const n = Number(p)
+    return n >= 0 && n <= 255
+  })
+}
+
+function parseProbeInput(raw: string): { ip: string; port?: number } | null {
+  const s = raw.trim().replace(/：/g, ':')
+  if (!s || s.includes('/') || /\s/.test(s)) return null
+  const parts = s.split(':')
+  if (parts.length === 1) {
+    return isIPv4(parts[0]) ? { ip: parts[0] } : null
+  }
+  if (parts.length === 2) {
+    const [ip, portStr] = parts
+    if (!isIPv4(ip) || !/^\d+$/.test(portStr)) return null
+    const port = Number(portStr)
+    if (port < 1 || port > 65535) return null
+    return { ip, port }
+  }
+  return null
+}
+
+function deviceKey(d: DeviceInfo): string {
+  return `${d.ip}:${d.port}`
+}
 
 function subnetStatusText(s: SubnetRow): { text: string; cls: string } {
   switch (s.status) {
@@ -91,10 +126,38 @@ async function startScan(): Promise<void> {
   }
 }
 
+async function runProbe(): Promise<void> {
+  if (probing.value || scanning.value) return
+  const parsed = parseProbeInput(probeInput.value)
+  if (!parsed) {
+    toast('地址格式错误，请输入 IP 或 IP:端口', 'error')
+    return
+  }
+  probing.value = true
+  try {
+    const ack = await api.probe(parsed.ip, parsed.port)
+    if (ack.found && ack.device) {
+      const d = ack.device
+      const key = deviceKey(d)
+      const idx = scan.devices.findIndex(x => deviceKey(x) === key)
+      if (idx >= 0) scan.devices[idx] = d
+      else scan.devices.push(d)
+      scan.show = true
+      toast(`已发现 ${d.hostname || d.ip}:${d.port}`, 'success')
+    } else {
+      toast(ack.reason || '探测失败', 'error')
+    }
+  } catch (e) {
+    toast(`探测失败：${(e as Error).message}`, 'error')
+  } finally {
+    probing.value = false
+  }
+}
+
 /** 选择设备 → 自动 discover-key → 配对。 */
 async function pairDevice(dev: DeviceInfo): Promise<void> {
-  if (pairingIp.value) return
-  pairingIp.value = dev.ip
+  if (pairingDevice.value) return
+  pairingDevice.value = deviceKey(dev)
   try {
     // 关键：走同源后端 /api/discover-key 代理，不直连 http://Windows:port
     const key = await api.discoverKey(dev.ip, dev.port)
@@ -110,7 +173,7 @@ async function pairDevice(dev: DeviceInfo): Promise<void> {
   } catch (e) {
     toast(`配对失败：${(e as Error).message}`, 'error')
   } finally {
-    pairingIp.value = ''
+    pairingDevice.value = ''
   }
 }
 
@@ -215,29 +278,49 @@ onMounted(async () => {
         <button class="btn btn-primary btn-block" :disabled="scanning" @click="startScan">
           <span v-if="scanning" class="spinner"></span><template v-else><GIcon name="search" :size="15" /> </template>{{ scanning ? '扫描中…' : '开始扫描' }}
         </button>
-        <template v-if="scan.show">
-          <div class="scan-progress">
-            <div class="scan-progress-bar" :style="{ width: scan.percent + '%' }"></div>
+
+        <div class="probe-section">
+          <div class="probe-label">或指定地址匹配</div>
+          <div class="field-row">
+            <input
+              v-model="probeInput"
+              type="text"
+              :placeholder="`输入 IP 或 IP:端口（默认 ${defaultListenerPort}）`"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <button class="btn btn-primary" :disabled="probing || scanning" @click="runProbe">
+              <span v-if="probing" class="spinner"></span>探测
+            </button>
           </div>
-          <div class="scan-stat">{{ scan.stat }}</div>
-          <div
-            v-for="s in scan.subnets"
-            :key="s.subnet"
-            class="subnet-row"
-          >
-            <code>{{ s.subnet }}</code>
-            <span class="st" :class="subnetStatusText(s).cls">{{ subnetStatusText(s).text }}</span>
-          </div>
+          <div class="hint">已知 Windows 监听器地址时可跳过全网段扫描；端口可省略，默认使用配置值 {{ defaultListenerPort }}</div>
+        </div>
+
+        <template v-if="scan.show || scan.devices.length">
+          <template v-if="scan.subnets.length > 0">
+            <div class="scan-progress">
+              <div class="scan-progress-bar" :style="{ width: scan.percent + '%' }"></div>
+            </div>
+            <div class="scan-stat">{{ scan.stat }}</div>
+            <div
+              v-for="s in scan.subnets"
+              :key="s.subnet"
+              class="subnet-row"
+            >
+              <code>{{ s.subnet }}</code>
+              <span class="st" :class="subnetStatusText(s).cls">{{ subnetStatusText(s).text }}</span>
+            </div>
+          </template>
           <div v-if="scan.errorMsg" class="scan-error">{{ scan.errorMsg }}</div>
-          <div v-for="d in scan.devices" :key="d.ip" class="card dev-card">
+          <div v-for="d in scan.devices" :key="deviceKey(d)" class="card dev-card">
             <div class="pair-row">
               <span class="badge b-running"><GIcon name="signal" :size="12" /> 发现设备</span>
               <div class="pair-info">
                 <div class="pair-host">{{ d.hostname || '(未知主机)' }}</div>
                 <div class="pair-sub">{{ d.ip }}:{{ d.port }}{{ d.version ? ' · v' + d.version : '' }}</div>
               </div>
-              <button class="btn btn-primary btn-pair" :disabled="!!pairingIp" @click="pairDevice(d)">
-                <span v-if="pairingIp === d.ip" class="spinner"></span>配对
+              <button class="btn btn-primary btn-pair" :disabled="!!pairingDevice" @click="pairDevice(d)">
+                <span v-if="pairingDevice === deviceKey(d)" class="spinner"></span>配对
               </button>
             </div>
           </div>
@@ -283,6 +366,9 @@ onMounted(async () => {
 .pair-info { flex: 1; min-width: 0; }
 .pair-host { font-size: var(--font-md); font-weight: 700; }
 .pair-sub { font-size: var(--font-xs); color: var(--text-2); margin-top: 2px; font-family: var(--font-mono); }
+
+.probe-section { margin-top: var(--space-3); }
+.probe-label { font-size: var(--font-sm); color: var(--text-3); margin-bottom: 6px; }
 
 .scan-progress {
   height: 8px; border-radius: var(--radius-full);

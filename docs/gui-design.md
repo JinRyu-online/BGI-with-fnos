@@ -298,7 +298,8 @@ export const TERMINAL_STATES = Object.keys(JOB_STATE_MAP).filter(k => JOB_STATE_
 
 - **状态页主操作区**：`中止`（`btn-secondary`，仅 running/completing 可用，其余禁用置灰；completing 反悔窗口时叠加 `btn-attention` 红色脉冲光环）+ `强制清理`（`btn-danger` 红，恒可点，点击弹确认）。
 - **设置页配对卡**：已配对显示主机名 + `ip:port · 版本`（等宽小字）+ 绿色"已配对"徽章；未配对灰徽章 + 引导文案。顶栏右侧同步显示设备 chip（未配对时灰）。
-- **扫描区**：开始按钮 → spinner 态 → 进度条（`--brand`，8px 圆角，width 过渡 0.3s）+ 子网逐行"等待 → 扫描中…（蓝）→ 发现 n 台（绿）/ 无设备（灰）"→ 完成后出现设备卡与"配对"按钮。
+- **扫描区**：开始按钮 → spinner 态 → 进度条（`--brand`，8px 圆角，width 过渡 0.3s）+ 子网逐行"等待 → 扫描中…（蓝）→ 发现 n 台（绿）/ 无设备（灰）"→ 完成后出现设备卡与"配对"按钮。进度条/子网行仅在有扫描计划时展示（`scan.subnets.length > 0`），避免仅探测时露出空壳。
+- **指定地址匹配（扫描区下方）**：label「或指定地址匹配」+ 输入框（placeholder 含当前默认端口，从 `config.scan.listener_port` 回填）+「探测」按钮。输入 `IP` 或 `IP:端口`（全角冒号归一化）；探测成功设备并入设备列表（key=`ip:port`），走同一「配对」按钮；失败 Toast 后端 reason。扫描中禁用探测按钮。
 - **WOL 区**：MAC 输入框（等宽字体，focus 蓝描边 + 弱蓝光圈）+ 唤醒按钮；格式 `/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/` 校验，失败弹错误 Toast。
 
 ---

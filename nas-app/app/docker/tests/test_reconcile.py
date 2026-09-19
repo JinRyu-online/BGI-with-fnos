@@ -1,4 +1,4 @@
-"""后台对账循环与终态修复回归测试（本次事故核心双保险）。
+﻿"""后台对账循环与终态修复回归测试（本次事故核心双保险）。
 
 事故回顾：/api/status 曾把终态集合写成 ("done", "timeout", "failed", "aborted")——
 "timeout" 拼错（实际是 timed_out）且漏 abnormal_exit，导致超时/异常退出任务在
@@ -71,7 +71,7 @@ def _seed_history(tmp_path, records):
     return str(p)
 
 
-def _paired_config(tmp_path, ip="10.0.0.5", port=8765):
+def _paired_config(tmp_path, ip="10.0.0.5", port=18765):
     import json
     cfg = {"default_target": {"ip": ip, "port": port, "hostname": "PC"},
            "api_key": "k", "target_mac": ""}

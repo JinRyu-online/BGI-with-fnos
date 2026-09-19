@@ -35,7 +35,14 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from discovery import auto_discover_and_scan, list_local_subnets, COMMON_SUBNETS
+from discovery import (
+    COMMON_SUBNETS,
+    auto_discover_and_scan,
+    default_http_get,
+    default_probe,
+    list_local_subnets,
+    probe_host,
+)
 from history import HistoryStore, default_history_path
 from job_log_store import JobLogStore, default_logs_dir, valid_job_id
 from listener_client import (
@@ -175,6 +182,12 @@ class ScanBody(BaseModel):
     """True 时同步返回 {devices},False 时启动异步扫描任务。"""
 
 
+class ProbeBody(BaseModel):
+    ip: str
+    port: int | None = None
+    """None → cfg["scan"]["listener_port"]；仅 is not None 时覆盖配置默认。"""
+
+
 class PairBody(BaseModel):
     ip: str
     port: int
@@ -259,6 +272,7 @@ def create_app(
     wake_fn: Callable[[str], None] | None = None,
     health_probe_fn: Callable[[ListenerClient], bool] | None = None,
     scheduler_injector: Callable[[Callable[[], object], Callable[[], dict]], object] | None = None,
+    host_prober: Callable[[str, int], dict] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用。
 
@@ -275,6 +289,8 @@ def create_app(
       wake_fn(mac)               -> WOL 唤醒动作（默认 wol.send_magic_packet）
       health_probe_fn(client)    -> listener 就绪探测（默认 client.health() 可达即 True）
       scheduler_injector(client_getter, state_getter) -> Scheduler 实例（完全替换内置调度器）
+      host_prober(ip, port)      -> 单点探测结果 dict（ok/device 或 ok=False+reason）；
+                                    默认走 discovery.probe_host
 
     后台对账：lifespan 启动 daemon 线程，每 reconcile_interval 秒把 history 中
     running/completing 的记录向监听器查询一遍，终态/404 落盘，根治"浏览器一关
@@ -296,6 +312,7 @@ def create_app(
     scan_fn = scanner or _default_scanner
     client_fn = client_factory or _default_client_factory
     schedule_state = ScheduleStateStore(state_path or default_state_path())
+    prober_fn = host_prober or (lambda ip, port: probe_host(ip, port, default_probe, default_http_get))
 
     # ---------- 历史日志录制（B2）----------
 
@@ -761,6 +778,35 @@ def create_app(
         snap["scanned_ips"] = scanned_ips
         snap["total_ips"] = total_ips
         return snap
+
+    @app.post("/api/probe")
+    def api_probe(body: ProbeBody) -> dict:
+        """单点探测：已知 IP[:port] 时跳过全网段扫描，直接匹配 BetterGI 监听器身份。
+
+        端口：仅当 body.port is not None 时覆盖配置默认；0/负数/>65535 → 400。
+        探测未命中一律 200 + found:false（入参非法才 400）。
+        """
+        import ipaddress
+
+        try:
+            ipaddress.IPv4Address(body.ip)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="IP 地址格式不正确")
+        cfg = settings.load()
+        port = cfg["scan"]["listener_port"] if body.port is None else body.port
+        if not (1 <= port <= 65535):
+            raise HTTPException(status_code=400, detail="端口必须在 1–65535")
+        result = prober_fn(body.ip, port)
+        if result.get("ok") and result.get("device"):
+            return {"found": True, "device": result["device"]}
+        reason = result.get("reason", "")
+        if reason == "connect_failed":
+            msg = "无法连接该地址:端口"
+        elif reason == "not_listener":
+            msg = "该地址未识别为 BetterGI 监听器"
+        else:
+            msg = "探测失败"
+        return {"found": False, "reason": msg}
 
     @app.get("/api/discover-key")
     def api_discover_key(ip: str, port: int = 18765) -> dict:

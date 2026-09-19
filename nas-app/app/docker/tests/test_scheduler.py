@@ -1,4 +1,4 @@
-"""定时任务调度测试。
+﻿"""定时任务调度测试。
 
 覆盖（对应 docs/定时任务方案.md 验收）：
 - 纯函数：parse_hhmm / next_fire_at / is_due（跨日、周日、窗口、防重入、超窗）
@@ -253,7 +253,7 @@ def test_execute_success_records_history_and_state(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     cfg["target_mac"] = "AA-BB-CC-DD-EE-FF"
     cfg["schedules"] = [_make_sched("s1", time="12:00", weekdays=[0])]
@@ -292,7 +292,7 @@ def test_execute_wol_failure(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     cfg["target_mac"] = "AA-BB-CC-DD-EE-FF"
     cfg["schedules"] = [_make_sched("s1", wake=True)]  # 显式开 WOL（默认 False 是 PC 常开场景）
@@ -331,7 +331,7 @@ def test_execute_busy_skipped(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     cfg["schedules"] = [_make_sched("s1")]
     s.save(cfg)
@@ -365,7 +365,7 @@ def test_execute_task_not_found(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     cfg["schedules"] = [_make_sched("s1")]
     s.save(cfg)
@@ -424,7 +424,7 @@ def test_scheduler_thread_fires_when_due(tmp_path):
     from settings import Settings
     s = Settings(tmp_path / "config.json")
     cfg = s.load()
-    cfg["default_target"] = {"ip": "10.0.0.5", "port": 8765, "hostname": "PC"}
+    cfg["default_target"] = {"ip": "10.0.0.5", "port": 18765, "hostname": "PC"}
     cfg["api_key"] = "k"
     # 触发点=1 分钟前（naive 本地时间在窗口内），weekdays 全天
     now = datetime.now()
